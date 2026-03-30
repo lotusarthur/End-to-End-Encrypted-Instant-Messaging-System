@@ -1,0 +1,553 @@
+
+ 1. 共享数据结构（`shared/protocol/`）
+
+所有模块必须使用这些结构，禁止自定义格式。
+
+ 1.1 消息信封（网络传输用）
+```python
+from dataclasses import dataclass
+from typing import Optional
+import time
+import uuid
+
+@dataclass
+class Envelope:
+    """客户端 ↔ 服务器 传输的密文信封"""
+    message_id: str
+    from_user: str
+    to_user: str
+    ciphertext: bytes          # 加密模块输出的密文（包含 nonce、认证标签等）
+    timestamp: int             # 发送时间戳（Unix 秒）
+    ttl_seconds: int           # 生存时间（秒）
+    signature: Optional[bytes] = None   # 可选，用于端到端签名
+
+    @staticmethod
+    def create(from_user: str, to_user: str, ciphertext: bytes, ttl: int) -> "Envelope":
+        return Envelope(
+            message_id=str(uuid.uuid4()),
+            from_user=from_user,
+            to_user=to_user,
+            ciphertext=ciphertext,
+            timestamp=int(time.time()),
+            ttl_seconds=ttl
+        )
+```
+
+ 1.2 明文消息（加密前的业务对象）
+```python
+@dataclass
+class PlainMessage:
+    """加密前的明文，包含业务信息"""
+    message_id: str
+    sender: str
+    recipient: str
+    content: str
+    timestamp: int
+    ttl_seconds: int
+    msg_type: str   # "text", "delivery_receipt", "key_exchange"
+```
+
+ 1.3 会话信息（本地存储）
+```python
+@dataclass
+class Session:
+    """与某个联系人的加密会话"""
+    session_id: str
+    peer_user_id: str
+    root_key: bytes
+    send_chain_key: bytes
+    recv_chain_key: bytes
+    send_counter: int
+    recv_counter: int
+    created_at: int
+    last_used: int
+```
+
+ 1.4 其他常量
+```python
+# constants.py
+MSG_TYPE_TEXT = "text"
+MSG_TYPE_DELIVERY_RECEIPT = "delivery_receipt"
+MSG_TYPE_KEY_EXCHANGE = "key_exchange"
+
+FRIEND_REQUEST_PENDING = "pending"
+FRIEND_REQUEST_ACCEPTED = "accepted"
+FRIEND_REQUEST_DECLINED = "declined"
+FRIEND_REQUEST_CANCELLED = "cancelled"
+
+DEFAULT_TTL = 86400  # 默认消息保留一天（非自毁）
+MAX_TTL = 604800     # 最大 TTL 一周
+```
+
+---
+
+ 2. 后端 API 规范（供客户端网络模块调用）
+
+后端开发必须实现以下 RESTful API。所有请求需通过 TLS，除注册/登录外均需在 `Authorization: Bearer <token>` 头中携带 JWT。
+
+ 2.1 认证相关
+
+ `POST /api/v1/users` – 注册
+**请求体**:
+```json
+{
+  "username": "alice",
+  "password": "secret",
+  "otp_secret": "optional_if_provided_by_client"
+}
+```
+**响应**:
+- 201 Created: `{"user_id": "alice", "message": "registered"}`
+- 400: 用户名已存在或格式无效
+
+ `POST /api/v1/auth/login` – 登录
+**请求体**:
+```json
+{
+  "username": "alice",
+  "password": "secret",
+  "otp_code": "123456"
+}
+```
+**响应**:
+- 200 OK: `{"token": "jwt_token", "expires_in": 3600}`
+- 401: 认证失败
+
+ `POST /api/v1/auth/logout` – 登出
+**请求头**: `Authorization: Bearer <token>`
+**响应**: 204 No Content
+
+ 2.2 用户与公钥
+
+ `GET /api/v1/users/{username}/public-key` – 获取身份公钥
+**响应**:
+```json
+{
+  "username": "bob",
+  "identity_public_key": "base64_encoded_key"
+}
+```
+
+ `GET /api/v1/users/me` – 获取当前用户信息
+**响应**:
+```json
+{
+  "user_id": "alice",
+  "username": "alice",
+  "identity_public_key": "base64_encoded_key"
+}
+```
+
+ 2.3 好友管理
+
+ `POST /api/v1/friend-requests` – 发送好友请求
+**请求体**:
+```json
+{
+  "to_user": "bob"
+}
+```
+**响应**:
+- 201: `{"request_id": "uuid", "status": "pending"}`
+
+ `PUT /api/v1/friend-requests/{request_id}` – 处理请求
+**请求体**:
+```json
+{
+  "status": "accepted"   // 或 "declined"
+}
+```
+**响应**: 200 OK
+
+ `GET /api/v1/friend-requests?type=sent|received` – 获取请求列表
+**响应**:
+```json
+{
+  "requests": [
+    {"request_id": "uuid", "from_user": "alice", "to_user": "bob", "status": "pending", "created_at": 1234567890}
+  ]
+}
+```
+
+ `GET /api/v1/friends` – 获取好友列表
+**响应**:
+```json
+{
+  "friends": [
+    {"user_id": "bob", "username": "bob", "identity_public_key": "base64", "added_at": 1234567890}
+  ]
+}
+```
+
+ `DELETE /api/v1/friends/{username}` – 删除好友
+**响应**: 204 No Content
+
+ `POST /api/v1/friends/{username}/block` – 屏蔽用户
+**响应**: 200 OK
+
+ 2.4 消息
+
+ `POST /api/v1/messages` – 发送消息（同步）
+**请求体**:
+```json
+{
+  "to": "bob",
+  "ciphertext": "base64_encoded_bytes",
+  "ttl_seconds": 30
+}
+```
+**响应**:
+- 202 Accepted: `{"message_id": "uuid", "status": "queued"}`
+
+ `GET /api/v1/messages/offline` – 拉取离线消息
+**响应**:
+```json
+{
+  "messages": [
+    {
+      "message_id": "uuid",
+      "from": "alice",
+      "ciphertext": "base64",
+      "timestamp": 1234567890,
+      "ttl_seconds": 30
+    }
+  ]
+}
+```
+**注意**: 服务器应在返回后删除这些离线消息（或标记为已取）。
+
+ 2.5 WebSocket 实时推送
+
+- **端点**: `ws://host/api/v1/ws?token=<jwt>`
+- **服务器推送消息格式**（与 `POST /api/v1/messages` 响应体一致）:
+```json
+{
+  "type": "message",
+  "data": {
+    "message_id": "uuid",
+    "from": "alice",
+    "ciphertext": "base64",
+    "timestamp": 1234567890,
+    "ttl_seconds": 30
+  }
+}
+```
+
+---
+
+ 3. 客户端加密模块接口（`client/crypto/`）
+
+加密模块需提供以下类或函数。所有密钥和会话状态需持久化到本地安全存储（如 keyring + 加密文件）。
+
+ 3.1 类 `KeyManager`
+```python
+class KeyManager:
+    def generate_identity_keypair(self) -> None:
+        """生成本地身份密钥对，保存到安全存储"""
+        pass
+
+    def get_identity_public_key(self) -> bytes:
+        """返回身份公钥（原始字节）"""
+        pass
+
+    def get_identity_private_key(self) -> bytes:
+        """返回身份私钥（仅本地使用）"""
+        pass
+
+    def save_prekey(self, prekey: bytes) -> None:
+        """存储一次性预共享密钥（可选，若使用 X3DH）"""
+        pass
+
+    def get_prekey(self) -> bytes:
+        """获取一个未使用的预共享密钥"""
+        pass
+```
+
+ 3.2 类 `SessionManager`
+```python
+class SessionManager:
+    def create_outbound_session(self, peer_user_id: str, peer_public_key: bytes) -> str:
+        """
+        发起与对方的会话（调用 DH 交换等），返回 session_id。
+        该 session_id 用于后续加密。
+        """
+        pass
+
+    def create_inbound_session(self, peer_user_id: str, initiator_public_key: bytes) -> str:
+        """
+        响应对方的会话建立请求，返回 session_id。
+        """
+        pass
+
+    def get_session(self, session_id: str) -> Session:
+        """获取会话对象（用于加密/解密）"""
+        pass
+
+    def get_session_by_peer(self, peer_user_id: str) -> Optional[Session]:
+        """获取与指定用户的已有会话"""
+        pass
+
+    def delete_session(self, session_id: str) -> None:
+        """删除会话（例如用户屏蔽时）"""
+        pass
+```
+
+ 3.3 类 `MessageCrypto`
+```python
+class MessageCrypto:
+    def __init__(self, session_manager: SessionManager):
+        self.session_manager = session_manager
+
+    def encrypt(self, session_id: str, plain_msg: PlainMessage) -> bytes:
+        """
+        使用会话加密明文消息。
+        内部需将 PlainMessage 序列化为 JSON 或 Protobuf，然后进行 AEAD 加密，
+        并绑定关联数据（sender, recipient, message_id, counter, ttl）。
+        返回密文（包含 nonce 和认证标签）。
+        """
+        pass
+
+    def decrypt(self, session_id: str, ciphertext: bytes, associated_data: dict) -> PlainMessage:
+        """
+        使用会话解密密文。
+        先验证 AEAD，再反序列化得到 PlainMessage。
+        如果计数器检查失败（重放），抛出 ReplayAttackError。
+        """
+        pass
+
+    def get_peer_fingerprint(self, peer_user_id: str) -> str:
+        """返回对方身份公钥的指纹（例如 SHA-256 前 16 字符）"""
+        pass
+
+    def check_key_change(self, peer_user_id: str, new_public_key: bytes) -> bool:
+        """
+        检查对方公钥是否变更。
+        若变更，应返回 True，由上层决定如何处理。
+        """
+        pass
+```
+
+ 3.4 异常类
+```python
+class CryptoError(Exception):
+    pass
+
+class ReplayAttackError(CryptoError):
+    pass
+
+class KeyChangedError(CryptoError):
+    pass
+```
+
+---
+
+ 4. 客户端网络模块接口（`client/network/`）
+
+网络模块负责所有服务器通信，提供异步回调或同步方法（建议使用异步或回调）。所有方法内部应处理网络错误、重试、Token 刷新。
+
+```python
+class NetworkClient:
+    def __init__(self, server_url: str):
+        self.server_url = server_url
+
+    # 认证
+    def register(self, username: str, password: str, otp_secret: str) -> dict:
+        """返回用户信息"""
+        pass
+
+    def login(self, username: str, password: str, otp_code: str) -> str:
+        """返回 JWT token"""
+        pass
+
+    def logout(self) -> None:
+        """登出（可选）"""
+        pass
+
+    # 用户与公钥
+    def get_public_key(self, username: str) -> bytes:
+        """返回公钥（原始字节）"""
+        pass
+
+    def get_my_info(self) -> dict:
+        """返回当前用户信息"""
+        pass
+
+    # 好友管理
+    def send_friend_request(self, to_user: str) -> str:
+        """返回 request_id"""
+        pass
+
+    def accept_friend_request(self, request_id: str) -> None:
+        pass
+
+    def decline_friend_request(self, request_id: str) -> None:
+        pass
+
+    def cancel_friend_request(self, request_id: str) -> None:
+        pass
+
+    def get_friend_requests(self, request_type: str = "received") -> list:
+        """返回请求列表（每个为 dict）"""
+        pass
+
+    def get_friends(self) -> list:
+        """返回好友列表"""
+        pass
+
+    def remove_friend(self, username: str) -> None:
+        pass
+
+    def block_user(self, username: str) -> None:
+        pass
+
+    # 消息
+    def send_message(self, to_user: str, ciphertext: bytes, ttl: int) -> str:
+        """发送密文，返回服务器分配的 message_id"""
+        pass
+
+    def fetch_offline_messages(self) -> list:
+        """获取所有离线消息，返回 Envelope 字典列表"""
+        pass
+
+    # WebSocket
+    def connect_websocket(self, on_message_callback: callable) -> None:
+        """
+        建立 WebSocket 连接，并持续接收消息。
+        on_message_callback 会收到一个 Envelope 字典（或对象）。
+        """
+        pass
+
+    def disconnect_websocket(self) -> None:
+        pass
+```
+
+---
+
+ 5. 客户端业务层接口（`client/business/`）
+
+业务层是 UI 的唯一入口，整合加密、网络、本地存储。提供以下方法供 UI 调用。
+
+ 5.1 类 `ChatFacade`
+```python
+class ChatFacade:
+    def __init__(self, network: NetworkClient, crypto: MessageCrypto, session_mgr: SessionManager, db_path: str):
+        self.network = network
+        self.crypto = crypto
+        self.session_mgr = session_mgr
+        self.db = LocalDatabase(db_path)   # 内部管理本地存储
+
+    # 认证与初始化
+    def login(self, username: str, password: str, otp_code: str) -> bool:
+        """登录，获取 token，初始化本地密钥等"""
+        pass
+
+    def register(self, username: str, password: str, otp_secret: str = None) -> bool:
+        """注册，并生成本地身份密钥对"""
+        pass
+
+    def logout(self) -> None:
+        pass
+
+    # 好友管理（UI 调用）
+    def search_user(self, username: str) -> Optional[dict]:
+        """查找用户，返回基本信息"""
+        pass
+
+    def send_friend_request(self, username: str) -> str:
+        """发送好友请求，返回 request_id"""
+        pass
+
+    def accept_friend_request(self, request_id: str) -> None:
+        """接受请求后，自动建立加密会话"""
+        pass
+
+    def decline_friend_request(self, request_id: str) -> None:
+        pass
+
+    def get_pending_requests(self) -> list:
+        """获取待处理的好友请求（包括发送和接收）"""
+        pass
+
+    def get_friends(self) -> list:
+        """返回好友列表（包含用户名、指纹等）"""
+        pass
+
+    def remove_friend(self, username: str) -> None:
+        """删除好友，同时删除本地会话和消息"""
+        pass
+
+    # 消息
+    def send_text_message(self, to_user: str, text: str, ttl_seconds: int = 30) -> str:
+        """发送文本消息，返回本地消息 ID"""
+        pass
+
+    def get_conversations(self) -> list:
+        """返回会话列表，按最后消息时间排序，包含未读数、最后消息预览"""
+        pass
+
+    def get_messages(self, peer_user_id: str, limit: int = 50, offset: int = 0) -> list:
+        """获取与某个好友的消息历史（按时间升序）"""
+        pass
+
+    def mark_messages_read(self, peer_user_id: str) -> None:
+        """将与该好友的未读消息标记为已读"""
+        pass
+
+    # 指纹与安全
+    def get_contact_fingerprint(self, peer_user_id: str) -> str:
+        """获取联系人的指纹"""
+        pass
+
+    def verify_contact(self, peer_user_id: str, expected_fingerprint: str) -> bool:
+        """用户手动验证联系人，保存验证状态"""
+        pass
+
+    def on_key_change(self, peer_user_id: str, new_key: bytes) -> None:
+        """当检测到联系人公钥变更时，业务层决定策略（警告、阻止等）"""
+        pass
+
+    # 自毁定时器
+    def start_expiry_scanner(self, interval_seconds: int = 60) -> None:
+        """启动后台线程，定期删除过期消息并通知 UI"""
+        pass
+```
+
+ 5.2 本地数据库接口（业务层内部使用）
+```python
+class LocalDatabase:
+    def save_message(self, msg: dict) -> None: ...
+    def get_messages(self, peer: str, limit: int, offset: int) -> list: ...
+    def delete_expired_messages(self) -> int: ...
+    def update_message_status(self, msg_id: str, status: str) -> None: ...
+    def get_conversations(self) -> list: ...
+    def get_unread_count(self, peer: str) -> int: ...
+    def mark_read(self, peer: str) -> None: ...
+    def save_friend(self, user_info: dict) -> None: ...
+    def delete_friend(self, user_id: str) -> None: ...
+    # ... 其他持久化方法
+```
+
+---
+
+ 6. UI 模块职责
+
+UI 模块需调用 `ChatFacade` 提供的方法，并监听来自业务层的事件（如新消息到达、好友请求更新、消息状态变更）。建议业务层使用回调或信号机制。
+
+业务层应提供一个事件总线，UI 可注册：
+```python
+class EventBus:
+    def on_new_message(self, callback: Callable[[PlainMessage], None]): ...
+    def on_friend_request_received(self, callback: Callable[[dict], None]): ...
+    def on_message_status_changed(self, callback: Callable[[str, str], None]): ...  # (msg_id, status)
+    def on_key_change_warning(self, callback: Callable[[str], None]): ...
+```
+
+UI 开发者只需根据业务需求调用 `ChatFacade` 方法并处理事件，无需关心加密和网络细节。
+
+---
+
+ 7. 并行开发策略
+
+1. 接口冻结：以上接口如需修改，需通知全员并更新本文档。
+2. Mock 实现：每个模块可以先写 mock 类，返回硬编码数据，供其他模块调用。例如业务层可以先写一个 `MockNetworkClient` 和 `MockCryptoManager`，让 UI 可以立即开始工作。
+
