@@ -1,5 +1,7 @@
 from typing import Optional
 from ..shared.protocol.message_types import PlainMessage, Session
+from shared.protocol.message_types import EncryptedNetworkPackage
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 class CryptoError(Exception):
     pass
