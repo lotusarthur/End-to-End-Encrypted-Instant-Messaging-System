@@ -2,12 +2,6 @@ from typing import Dict, Optional
 
 
 class SessionManager:
-    """
-    Business-level conversation/session manager.
-    This does NOT implement crypto sessions itself.
-    It only manages local conversation metadata.
-    """
-
     def __init__(self, storage):
         self.storage = storage
         self._active_conversation_id: Optional[str] = None
