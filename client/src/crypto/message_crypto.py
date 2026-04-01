@@ -1,7 +1,14 @@
+import base64
+import hashlib
+import hmac
+import json
+import os
 from typing import Optional
-from ..shared.protocol.message_types import PlainMessage, Session
-from shared.protocol.message_types import EncryptedNetworkPackage
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+try:
+    from shared.protocol.message_types import PlainMessage
+except ImportError:
+    from ...shared.protocol.message_types import PlainMessage
 
 class CryptoError(Exception):
     pass
@@ -23,7 +30,27 @@ class MessageCrypto:
         并绑定关联数据（sender, recipient, message_id, counter, ttl）。
         返回密文（包含 nonce 和认证标签）。
         """
-        pass
+        session = self.session_manager.get_session(session_id)
+        counter = session.send_counter
+        nonce = os.urandom(12)
+        payload = json.dumps(
+            {
+                "message_id": plain_msg.message_id,
+                "sender": plain_msg.sender,
+                "recipient": plain_msg.recipient,
+                "content": plain_msg.content,
+                "timestamp": plain_msg.timestamp,
+                "ttl_seconds": plain_msg.ttl_seconds,
+                "msg_type": plain_msg.msg_type,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        key_stream = hashlib.sha256(session.send_chain_key + nonce + counter.to_bytes(8, "big")).digest()
+        ciphertext = bytes(b ^ key_stream[i % len(key_stream)] for i, b in enumerate(payload))
+        mac = hmac.new(session.send_chain_key, nonce + counter.to_bytes(8, "big") + ciphertext, hashlib.sha256).digest()
+        self.session_manager.update_session_counter(session_id, is_send=True)
+        return nonce + counter.to_bytes(8, "big") + ciphertext + mac
 
     def decrypt(self, session_id: str, ciphertext: bytes, associated_data: dict) -> PlainMessage:
         """
@@ -31,23 +58,52 @@ class MessageCrypto:
         先验证 AEAD，再反序列化得到 PlainMessage。
         如果计数器检查失败（重放），抛出 ReplayAttackError。
         """
-        pass
+        session = self.session_manager.get_session(session_id)
+        if len(ciphertext) < 12 + 8 + 32:
+            raise CryptoError("invalid ciphertext")
+        nonce = ciphertext[:12]
+        counter_bytes = ciphertext[12:20]
+        body = ciphertext[20:-32]
+        recv_mac = ciphertext[-32:]
+        expected_mac = hmac.new(session.recv_chain_key, nonce + counter_bytes + body, hashlib.sha256).digest()
+        if not hmac.compare_digest(recv_mac, expected_mac):
+            raise CryptoError("message authentication failed")
+        counter = int.from_bytes(counter_bytes, "big")
+        if counter < session.recv_counter:
+            raise ReplayAttackError("replayed message detected")
+        key_stream = hashlib.sha256(session.recv_chain_key + nonce + counter_bytes).digest()
+        plain_bytes = bytes(b ^ key_stream[i % len(key_stream)] for i, b in enumerate(body))
+        data = json.loads(plain_bytes.decode("utf-8"))
+        self.session_manager.update_session_counter(session_id, is_send=False)
+        return PlainMessage(
+            message_id=data["message_id"],
+            sender=data["sender"],
+            recipient=data["recipient"],
+            content=data["content"],
+            timestamp=int(data["timestamp"]),
+            ttl_seconds=int(data["ttl_seconds"]),
+            msg_type=data["msg_type"],
+        )
 
     def get_peer_fingerprint(self, peer_user_id: str) -> str:
         """返回对方身份公钥的指纹（例如 SHA-256 前 16 字符）"""
-        pass
+        digest = hashlib.sha256(peer_user_id.encode("utf-8")).hexdigest()
+        return digest[:16]
 
     def check_key_change(self, peer_user_id: str, new_public_key: bytes) -> bool:
         """
         检查对方公钥是否变更。
         若变更，应返回 True，由上层决定如何处理。
         """
-        pass
+        fingerprint_old = self.get_peer_fingerprint(peer_user_id)
+        fingerprint_new = hashlib.sha256(new_public_key).hexdigest()[:16]
+        return fingerprint_old != fingerprint_new
 
     def verify_signature(self, message_id: str, signature: bytes, public_key: bytes) -> bool:
         """验证消息签名"""
-        pass
+        expected = hmac.new(public_key, message_id.encode("utf-8"), hashlib.sha256).digest()
+        return hmac.compare_digest(expected, signature)
 
     def sign_message(self, message_id: str, private_key: bytes) -> bytes:
         """对消息进行签名"""
-        pass
+        return hmac.new(private_key, message_id.encode("utf-8"), hashlib.sha256).digest()
