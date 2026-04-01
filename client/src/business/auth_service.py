@@ -80,11 +80,9 @@ class AuthService:
             "username": resp.get("username", username),
         }
         self.storage.save_user_profile(profile)
-
-        # if login also returns/refreshes private key reference, save if needed
+        
         private_key = init_result.get("private_key")
         if profile["user_id"] and private_key:
-            # optional: store if not already stored
             self.storage.save_private_key(profile["user_id"], private_key)
 
         self.ws_client.connect(token)
