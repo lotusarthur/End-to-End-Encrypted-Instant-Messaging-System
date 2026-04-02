@@ -82,7 +82,7 @@ class MessagingServer:
     def __init__(self, host: str = "0.0.0.0", port: int = 80):
         self.host = host
         self.port = port
-        self.db = Database()
+        self.db = DatabaseManager()
         self.ws_manager = WebSocketManager()
         self.app = web.Application()
         self._setup_routes()
