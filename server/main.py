@@ -82,6 +82,8 @@ class MessagingServer:
     def __init__(self, host: str = "0.0.0.0", port: int = 80):
         self.host = host
         self.port = port
+        # 初始化数据库表结构
+        DatabaseSchema.init_database()
         self.db = DatabaseManager()
         self.ws_manager = WebSocketManager()
         self.app = web.Application()
@@ -134,7 +136,30 @@ class MessagingServer:
     async def register(self, request: web.Request) -> web.Response:
         """用户注册"""
         try:
-            data = await request.json()
+            '''
+            # 调试功能：查看原始请求体
+            raw_body = await request.text()
+            logger.info(f"接收到的原始数据: {raw_body}")
+            '''
+            # 尝试解析JSON
+            try:
+                data = await request.json()
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON解析失败: {e}")
+                # 尝试修复非标准JSON格式（缺少双引号的属性名和值）
+                try:
+                    # 修复属性名和属性值的双引号
+                    import re
+                    # 第一步：为属性名添加双引号
+                    fixed_body = re.sub(r'(\w+):', r'"\1":', raw_body)
+                    # 第二步：为字符串值添加双引号（匹配 : 后面的非特殊字符）
+                    fixed_body = re.sub(r':(\w+)', r':"\1"', fixed_body)
+                    logger.info(f"修复后的JSON: {fixed_body}")
+                    data = json.loads(fixed_body)
+                except Exception as fix_error:
+                    logger.error(f"JSON修复失败: {fix_error}")
+                    return web.json_response({'error': '无效的JSON格式，请使用标准JSON格式：{"username":"testuser","password":"testpass"}'}, status=400)
+            
             username = data.get('username')
             password = data.get('password')
             otp_secret = data.get('otp_secret')
