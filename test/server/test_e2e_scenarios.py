@@ -42,13 +42,13 @@ class TestE2EScenarios(unittest.TestCase):
             online_users: dict[str, MockWebSocket] = {}
 
             async def deliver_message_to_online_user(message: Message):
-                if message.to_user in online_users:
-                    ws = online_users[message.to_user]
+                if message.receiver_id in online_users:
+                    ws = online_users[message.receiver_id]
                     message_data = {
                         "type": "message",
                         "message_id": message.message_id,
-                        "from": message.from_user,
-                        "content": message.ciphertext,
+                        "from": message.sender_id,
+                        "content": message.ciphertext_b64,
                         "timestamp": message.timestamp,
                     }
                     await ws.send(json.dumps(message_data))
@@ -87,9 +87,12 @@ class TestE2EScenarios(unittest.TestCase):
                 message_id_2 = str(uuid.uuid4())
                 message_2 = Message(
                     message_id=message_id_2,
-                    from_user="alice",
-                    to_user="bob",
-                    ciphertext="encrypted_online_message",
+                    sender_id="alice",
+                    receiver_id="bob",
+                    ciphertext_b64="encrypted_online_message",
+                    nonce_b64="test_nonce",
+                    mac_tag_b64="test_mac_tag",
+                    ad_serialized="test_ad",
                     timestamp=int(time.time()),
                     ttl_seconds=3600,
                     status="sent",
@@ -112,9 +115,12 @@ class TestE2EScenarios(unittest.TestCase):
                 message_id_3 = str(uuid.uuid4())
                 message_3 = Message(
                     message_id=message_id_3,
-                    from_user="alice",
-                    to_user="bob",
-                    ciphertext="encrypted_offline_message",
+                    sender_id="alice",
+                    receiver_id="bob",
+                    ciphertext_b64="encrypted_offline_message",
+                    nonce_b64="test_nonce",
+                    mac_tag_b64="test_mac_tag",
+                    ad_serialized="test_ad",
                     timestamp=int(time.time()),
                     ttl_seconds=3600,
                     status="sent",

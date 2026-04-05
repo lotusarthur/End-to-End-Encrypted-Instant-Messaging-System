@@ -109,9 +109,12 @@ class TestDatabaseManager(unittest.TestCase):
             now = int(time.time())
             msg = Message(
                 message_id=msg_id,
-                from_user="alice",
-                to_user="bob",
-                ciphertext="encrypted_payload",
+                sender_id="alice",
+                receiver_id="bob",
+                ciphertext_b64="encrypted_payload",
+                nonce_b64="nonce",
+                mac_tag_b64="mac",
+                ad_serialized="ad",
                 timestamp=now,
                 ttl_seconds=3600,
                 status="sent",
@@ -122,7 +125,7 @@ class TestDatabaseManager(unittest.TestCase):
             offline = db.get_offline_messages("bob")
             self.assertEqual(len(offline), 1)
             self.assertEqual(offline[0].message_id, msg_id)
-            self.assertEqual(offline[0].ciphertext, "encrypted_payload")
+            self.assertEqual(offline[0].ciphertext_b64, "encrypted_payload")
 
             self.assertTrue(db.update_message_status(msg_id, "delivered"))
             # Offline messages are only those with status='sent'
@@ -153,9 +156,12 @@ class TestMessageManager(unittest.TestCase):
             old_ts = int(time.time()) - 3600
             msg = Message(
                 message_id=msg_id,
-                from_user="alice",
-                to_user="bob",
-                ciphertext="x",
+                sender_id="alice",
+                receiver_id="bob",
+                ciphertext_b64="x",
+                nonce_b64="nonce",
+                mac_tag_b64="mac",
+                ad_serialized="ad",
                 timestamp=old_ts,
                 ttl_seconds=1,
                 status="sent",
@@ -194,9 +200,12 @@ class TestMessageManager(unittest.TestCase):
             msg2_id = "m_expired"
             msg2 = Message(
                 message_id=msg2_id,
-                from_user="alice",
-                to_user="bob",
-                ciphertext="y",
+                sender_id="alice",
+                receiver_id="bob",
+                ciphertext_b64="y",
+                nonce_b64="nonce",
+                mac_tag_b64="mac",
+                ad_serialized="ad",
                 timestamp=old_ts,
                 ttl_seconds=1,
                 status="sent",
@@ -220,6 +229,29 @@ class TestMessageRouter(unittest.TestCase):
             db_path = str(Path(tmp) / "test_messaging.db")
             DatabaseSchema.init_database(db_path)
             db = DatabaseManager(db_path)
+            
+            alice = User(
+                username="alice",
+                password_hash="alice_pwd_hash",
+                identity_public_key="alice_pub",
+                otp_secret="alice_otp",
+                is_online=False,
+                last_seen=None,
+            )
+            bob = User(
+                username="bob",
+                password_hash="bob_pwd_hash",
+                identity_public_key="bob_pub",
+                otp_secret="bob_otp",
+                is_online=False,
+                last_seen=None,
+            )
+            self.assertTrue(db.add_user(alice))
+            self.assertTrue(db.add_user(bob))
+            
+            req_id = db.add_friend_request("alice", "bob")
+            self.assertIsNotNone(req_id)
+            self.assertTrue(db.update_friend_request_status(req_id, "accepted"))
 
             ws = DummyWsManager(online_users={"bob"})
             router = MessageRouter(ws_manager=ws, db=db, max_retries=1)
