@@ -45,6 +45,12 @@ class MessageRouter:
             logger.error(f"消息缺少目标用户字段: {route_rule.target_user}")
             return False
         
+        # 立即检查好友关系（对于普通消息类型）
+        if route_rule.message_type == 'message':
+            if not self.db.are_friends(from_user, target_user):
+                logger.warning(f"非好友通信被阻止: {from_user} -> {target_user}")
+                return False
+        
         # 创建路由任务
         task = asyncio.create_task(
             self._deliver_message(from_user, target_user, message, route_rule)
@@ -60,6 +66,10 @@ class MessageRouter:
     async def _deliver_message(self, from_user: str, target_user: str, 
                              message: Dict[str, Any], route_rule: MessageRoute) -> bool:
         """投递消息到目标用户"""
+        
+        # 好友关系检查已移至route_message方法中
+        # 这里只需要处理消息投递逻辑
+        
         for attempt in range(self.max_retries):
             try:
                 # 检查目标用户是否在线
@@ -67,13 +77,18 @@ class MessageRouter:
                     # 实时投递
                     success = await self.ws_manager.send_to_user(target_user, message)
                     
-                    if success and route_rule.require_ack:
-                        # 等待确认
-                        ack_received = await self._wait_for_ack(message.get('message_id'))
-                        if ack_received:
+                    if success:
+                        if route_rule.require_ack:
+                            # 等待确认
+                            ack_received = await self._wait_for_ack(message.get('message_id'))
+                            if ack_received:
+                                return True
+                            else:
+                                # ACK等待失败，立即重试
+                                continue
+                        else:
+                            # 不需要ACK，直接返回成功
                             return True
-                    elif success:
-                        return True
                 
                 # 如果实时投递失败或用户离线，存储为离线消息
                 if attempt == self.max_retries - 1:

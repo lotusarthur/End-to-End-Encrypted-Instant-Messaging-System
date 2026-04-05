@@ -78,16 +78,6 @@ class DatabaseManager:
     
     def add_friend_request(self, from_user: str, to_user: str) -> Optional[int]:
         """添加好友请求"""
-        # 检查用户是否存在
-        if not self.get_user(from_user) or not self.get_user(to_user):
-            return None
-        
-        # 检查是否已经发送过好友请求
-        existing_requests = self.get_friend_requests(from_user, "sent")
-        for req in existing_requests:
-            if req.user_b == to_user and req.status == "pending":
-                return None
-        
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -141,6 +131,12 @@ class DatabaseManager:
                     SET status = ?, accepted_at = ? 
                     WHERE id = ?
                 ''', (status, int(time.time()), request_id))
+            elif status in ('declined', 'cancelled'):
+                # 拒绝或取消申请时，删除记录以允许重新申请
+                cursor.execute('''
+                    DELETE FROM friend_relationships 
+                    WHERE id = ?
+                ''', (request_id,))
             else:
                 cursor.execute('''
                     UPDATE friend_relationships 
@@ -196,21 +192,38 @@ class DatabaseManager:
             return cursor.rowcount > 0
         except Exception:
             return False
+
+    def are_friends(self, user1: str, user2: str) -> bool:
+        """检查两个用户是否为好友"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM friend_relationships 
+                WHERE ((user_a = ? AND user_b = ?) OR (user_a = ? AND user_b = ?))
+                AND status = 'accepted'
+            ''', (user1, user2, user2, user1))
+            
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count > 0
+        except Exception:
+            return False
     
     # ========== 消息管理 ==========
     
     def add_message(self, message: Message) -> bool:
-        """添加消息"""
+        """添加消息 - 适配加密包格式"""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO messages 
-                (message_id, from_user, to_user, ciphertext, timestamp, ttl_seconds, status, signature)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (message.message_id, message.from_user, message.to_user, 
-                  message.ciphertext, message.timestamp, message.ttl_seconds, 
-                  message.status, message.signature))
+                (message_id, sender_id, receiver_id, ciphertext_b64, nonce_b64, mac_tag_b64, ad_serialized, timestamp, ttl_seconds, status, signature)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (message.message_id, message.sender_id, message.receiver_id, 
+                  message.ciphertext_b64, message.nonce_b64, message.mac_tag_b64, message.ad_serialized,
+                  message.timestamp, message.ttl_seconds, message.status, message.signature))
             conn.commit()
             conn.close()
             return True
@@ -218,12 +231,12 @@ class DatabaseManager:
             return False
     
     def get_offline_messages(self, username: str) -> List[Message]:
-        """获取用户的离线消息"""
+        """获取用户的离线消息 - 适配加密包格式"""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute('''
             SELECT * FROM messages 
-            WHERE to_user = ? AND status = 'sent'
+            WHERE receiver_id = ? AND status = 'sent'
             ORDER BY timestamp ASC
         ''', (username,))
         
@@ -233,9 +246,10 @@ class DatabaseManager:
         messages = []
         for row in rows:
             messages.append(Message(
-                message_id=row[0], from_user=row[1], to_user=row[2],
-                ciphertext=row[3], timestamp=row[4], ttl_seconds=row[5],
-                status=row[6], signature=row[7], delivered_at=row[8], read_at=row[9]
+                message_id=row[0], sender_id=row[1], receiver_id=row[2],
+                ciphertext_b64=row[3], nonce_b64=row[4], mac_tag_b64=row[5], ad_serialized=row[6],
+                timestamp=row[7], ttl_seconds=row[8], status=row[9], 
+                signature=row[10], delivered_at=row[11], read_at=row[12]
             ))
         return messages
     

@@ -489,8 +489,8 @@ class MessagingServer:
                 logger.warning(f"发送者身份不匹配: 声称的发送者 {sender_id} 与当前用户 {user.username}")
                 return
             
-            # 存储消息 - 使用EncryptedNetworkPackage结构
-            encrypted_package = EncryptedNetworkPackage(
+            # 存储消息 - 直接使用加密包格式的Message结构
+            message = Message(
                 message_id=message_id,
                 sender_id=sender_id,
                 receiver_id=receiver_id,
@@ -498,17 +498,6 @@ class MessagingServer:
                 nonce_b64=nonce_b64,
                 mac_tag_b64=mac_tag_b64,
                 ad_serialized=ad_serialized,
-                timestamp=timestamp,
-                ttl_seconds=ttl_seconds,
-                status='sent'
-            )
-            
-            # 转换为Message格式存储（保持向后兼容）
-            message = Message(
-                message_id=message_id,
-                from_user=sender_id,
-                to_user=receiver_id,
-                ciphertext=ciphertext_b64,  # 存储Base64编码的密文
                 timestamp=timestamp,
                 ttl_seconds=ttl_seconds,
                 status='sent',

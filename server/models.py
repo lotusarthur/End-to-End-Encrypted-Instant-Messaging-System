@@ -33,11 +33,14 @@ class FriendRelationship:
 
 @dataclass
 class Message:
-    """消息表模型"""
+    """消息表模型 - 已改为加密包形式"""
     message_id: str
-    from_user: str
-    to_user: str
-    ciphertext: str
+    sender_id: str
+    receiver_id: str
+    ciphertext_b64: str
+    nonce_b64: str
+    mac_tag_b64: str
+    ad_serialized: str
     timestamp: int
     ttl_seconds: int
     status: str  # 'sent', 'delivered', 'read', 'expired'
@@ -108,21 +111,24 @@ class DatabaseSchema:
             )
         ''')
         
-        # 消息表
+        # 消息表 - 适配加密包格式
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS messages (
                 message_id TEXT PRIMARY KEY,
-                from_user TEXT NOT NULL,
-                to_user TEXT NOT NULL,
-                ciphertext TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                receiver_id TEXT NOT NULL,
+                ciphertext_b64 TEXT NOT NULL,
+                nonce_b64 TEXT NOT NULL,
+                mac_tag_b64 TEXT NOT NULL,
+                ad_serialized TEXT NOT NULL,
                 timestamp INTEGER NOT NULL,
                 ttl_seconds INTEGER NOT NULL,
                 status TEXT NOT NULL CHECK(status IN ('sent', 'delivered', 'read', 'expired')),
                 signature TEXT,
                 delivered_at INTEGER,
                 read_at INTEGER,
-                FOREIGN KEY (from_user) REFERENCES users(username),
-                FOREIGN KEY (to_user) REFERENCES users(username)
+                FOREIGN KEY (sender_id) REFERENCES users(username),
+                FOREIGN KEY (receiver_id) REFERENCES users(username)
             )
         ''')
         
@@ -138,7 +144,7 @@ class DatabaseSchema:
         ''')
         
         # 创建索引以提高查询性能
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_to_user ON messages(to_user, status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_receiver_id ON messages(receiver_id, status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_friends_user_a ON friend_relationships(user_a, status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_friends_user_b ON friend_relationships(user_b, status)')

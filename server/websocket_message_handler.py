@@ -39,32 +39,52 @@ class WebSocketMessageHandler:
             return False
     
     async def _handle_chat_message(self, from_user: str, message: Dict[str, Any]):
-        """处理聊天消息"""
-        to_user = message.get('to')
-        ciphertext = message.get('ciphertext')
+        """处理聊天消息 - 适配加密包格式"""
+        # 提取加密包格式字段
         message_id = message.get('message_id')
+        sender_id = message.get('sender_id')
+        receiver_id = message.get('receiver_id')
+        ciphertext_b64 = message.get('ciphertext_b64')
+        nonce_b64 = message.get('nonce_b64')
+        mac_tag_b64 = message.get('mac_tag_b64')
+        ad_serialized = message.get('ad_serialized')
         
-        if not to_user or not ciphertext:
-            logger.warning(f"消息格式不完整: {message}")
+        if not all([message_id, sender_id, receiver_id, ciphertext_b64, nonce_b64, mac_tag_b64, ad_serialized]):
+            logger.warning(f"加密包格式消息不完整: {message}")
             return
         
-        # 存储消息到数据库
+        # 验证发送者身份
+        if sender_id != from_user:
+            logger.warning(f"发送者身份不匹配: 声称的发送者 {sender_id} 与当前用户 {from_user}")
+            return
+        
+        # 存储消息到数据库 - 使用加密包格式
         stored_message = self.db.store_message(
-            from_user=from_user,
-            to_user=to_user,
-            ciphertext=ciphertext,
             message_id=message_id,
+            sender_id=sender_id,
+            receiver_id=receiver_id,
+            ciphertext_b64=ciphertext_b64,
+            nonce_b64=nonce_b64,
+            mac_tag_b64=mac_tag_b64,
+            ad_serialized=ad_serialized,
+            timestamp=message.get('timestamp', int(time.time())),
             ttl_seconds=message.get('ttl_seconds', 86400)
         )
         
-        # 尝试实时转发
-        if self.ws_manager.is_user_online(to_user):
-            success = await self.ws_manager.send_to_user(to_user, {
+        # 尝试实时转发 - 使用完整的加密包格式
+        if self.ws_manager.is_user_online(receiver_id):
+            success = await self.ws_manager.send_to_user(receiver_id, {
                 'type': 'message',
-                'from': from_user,
-                'ciphertext': ciphertext,
-                'message_id': stored_message.message_id,
-                'timestamp': stored_message.timestamp
+                'message_id': message_id,
+                'sender_id': sender_id,
+                'receiver_id': receiver_id,
+                'ciphertext_b64': ciphertext_b64,
+                'nonce_b64': nonce_b64,
+                'mac_tag_b64': mac_tag_b64,
+                'ad_serialized': ad_serialized,
+                'timestamp': stored_message.timestamp,
+                'ttl_seconds': stored_message.ttl_seconds,
+                'status': 'delivered'
             })
             
             if success:
