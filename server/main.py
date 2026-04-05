@@ -38,7 +38,7 @@ class FriendRequest:
     from_user: str
     to_user: str
     status: str  # pending, accepted, declined, cancelled
-    created_at: int
+    created_at: int = None
     
     def __post_init__(self):
         if self.created_at is None:
@@ -305,7 +305,7 @@ class MessagingServer:
             status='pending'
         )
         
-        if self.db.add_friend_request(friend_request):
+        if self.db.add_friend_request(user.username, to_user):
             # 如果目标用户在线，实时通知
             if self.ws_manager.is_user_online(to_user):
                 await self.ws_manager.send_to_user(to_user, {
