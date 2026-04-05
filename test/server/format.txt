@@ -46,7 +46,7 @@
 
 传递格式:
 
-- MockWebSocket类格式:
+- MockWebSocket类格式（测试方法）:
 
   class MockWebSocket:
 
@@ -58,7 +58,7 @@
 
       
 
-- DummyWsManager类格式:
+- DummyWsManager类格式（测试方法）:
 
   class DummyWsManager:
 
@@ -67,12 +67,6 @@
       async def send_to_user(self, username: str, message: dict[str, Any]) -> bool
 
 
-
-实现思路:
-
-- 模拟真实WebSocket连接行为
-
-- 记录所有发送的消息用于验证
 
 
 
@@ -128,15 +122,6 @@
 
   }
 
-
-
-实现思路:
-
-- 支持新旧两种消息格式的兼容
-
-- 确保加密字段的Base64编码正确性
-
-- 实时消息和离线消息的统一处理
 
 
 
