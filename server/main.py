@@ -162,6 +162,7 @@ class MessagingServer:
             
             username = data.get('username')
             password = data.get('password')
+            identity_public_key = data.get('identity_public_key')
             otp_secret = data.get('otp_secret')
             
             if not username or not password:
@@ -176,6 +177,7 @@ class MessagingServer:
             user = User(
                 username=username, 
                 password_hash=password_hash, 
+                identity_public_key=identity_public_key,
                 otp_secret=otp_secret,
                 is_online=False,
                 last_seen=None
@@ -466,38 +468,72 @@ class MessagingServer:
         msg_type = data.get('type')
         
         if msg_type == 'message':
-            # 处理消息转发
-            to_user = data.get('to_user')
-            ciphertext = data.get('ciphertext')
+            # 处理EncryptedNetworkPackage格式的消息
+            message_id = data.get('message_id')
+            sender_id = data.get('sender_id')
+            receiver_id = data.get('receiver_id')
+            ciphertext_b64 = data.get('ciphertext_b64')
+            nonce_b64 = data.get('nonce_b64')
+            mac_tag_b64 = data.get('mac_tag_b64')
+            ad_serialized = data.get('ad_serialized')
+            timestamp = data.get('timestamp', int(time.time()))
             ttl_seconds = data.get('ttl_seconds', 86400)
-            signature = data.get('signature')
             
-            if not to_user or not ciphertext:
+            # 验证必需字段
+            if not all([message_id, sender_id, receiver_id, ciphertext_b64, nonce_b64, mac_tag_b64, ad_serialized]):
+                logger.warning(f"收到不完整的EncryptedNetworkPackage消息: {data}")
                 return
             
-            # 存储消息
-            message = Message(
-                message_id=str(uuid.uuid4()),
-                from_user=user.username,
-                to_user=to_user,
-                ciphertext=ciphertext,
+            # 验证发送者身份
+            if sender_id != user.username:
+                logger.warning(f"发送者身份不匹配: 声称的发送者 {sender_id} 与当前用户 {user.username}")
+                return
+            
+            # 存储消息 - 使用EncryptedNetworkPackage结构
+            encrypted_package = EncryptedNetworkPackage(
+                message_id=message_id,
+                sender_id=sender_id,
+                receiver_id=receiver_id,
+                ciphertext_b64=ciphertext_b64,
+                nonce_b64=nonce_b64,
+                mac_tag_b64=mac_tag_b64,
+                ad_serialized=ad_serialized,
+                timestamp=timestamp,
                 ttl_seconds=ttl_seconds,
-                signature=signature
+                status='sent'
+            )
+            
+            # 转换为Message格式存储（保持向后兼容）
+            message = Message(
+                message_id=message_id,
+                from_user=sender_id,
+                to_user=receiver_id,
+                ciphertext=ciphertext_b64,  # 存储Base64编码的密文
+                timestamp=timestamp,
+                ttl_seconds=ttl_seconds,
+                status='sent',
+                signature=mac_tag_b64  # 使用mac_tag作为签名
             )
             self.db.store_message(message)
             
-            # 如果目标用户在线，实时转发
-            if self.ws_manager.is_user_online(to_user):
-                await self.ws_manager.send_to_user(to_user, {
+            # 如果目标用户在线，实时转发完整的EncryptedNetworkPackage
+            if self.ws_manager.is_user_online(receiver_id):
+                await self.ws_manager.send_to_user(receiver_id, {
                     'type': 'message',
-                    'message_id': message.message_id,
-                    'from_user': user.username,
-                    'ciphertext': ciphertext,
-                    'timestamp': message.timestamp,
+                    'message_id': message_id,
+                    'sender_id': sender_id,
+                    'receiver_id': receiver_id,
+                    'ciphertext_b64': ciphertext_b64,
+                    'nonce_b64': nonce_b64,
+                    'mac_tag_b64': mac_tag_b64,
+                    'ad_serialized': ad_serialized,
+                    'timestamp': timestamp,
                     'ttl_seconds': ttl_seconds,
-                    'signature': signature
+                    'status': 'delivered'
                 })
-                self.db.update_message_status(message.message_id, 'delivered')
+                self.db.update_message_status(message_id, 'delivered')
+            
+            logger.info(f"消息 {message_id} 已从 {sender_id} 发送到 {receiver_id}")
         
         elif msg_type == 'ack':
             # 处理消息确认

@@ -1,21 +1,162 @@
-### 1. 数据库模型 (`models.py`)
 
-   用户表、好友关系表、消息表、用户公钥表
-   完整的表结构定义和索引优化
 
-### 2. 数据库管理类 (`database_manager.py`)
+## 📋 **服务器JSON格式总结**
 
-   完整的CRUD操作实现
-   用户管理、好友关系管理、消息管理、公钥管理
+### **1. REST API JSON格式**
 
-### 3. 消息状态管理器 (`message_manager.py`)
+#### **用户注册** `POST /api/v1/users`
+**请求格式：**
+```json
+{
+  "username": "用户名",
+  "password": "密码",
+  "identity_public_key": "用户身份公钥（可选）",
+  "otp_secret": "OTP密钥（可选）"
+}
+```
 
-   已发送、已送达、已读状态管理
-   离线消息投递机制
-   消息过期清理
+**响应格式：**
+```json
+{
+  "user_id": "用户名",
+  "message": "注册成功"
+}
+```
 
-### 4. 定时任务管理器 (`task_scheduler.py`)
+#### **用户登录** `POST /api/v1/auth/login`
+**请求格式：**
+```json
+{
+  "username": "用户名",
+  "password": "密码",
+  "otp_code": "OTP验证码（可选）"
+}
+```
 
-   定时删除未被拉取的消息（7天未拉取）
-   清理过期消息和好友请求
-   自动更新用户在线状态
+**响应格式：**
+```json
+{
+  "token": "JWT令牌",
+  "message": "登录成功"
+}
+```
+
+#### **获取用户信息** `GET /api/v1/users/me`
+**响应格式：**
+```json
+{
+  "username": "用户名",
+  "created_at": 创建时间戳,
+  "is_online": true/false
+}
+```
+
+#### **获取用户公钥** `GET /api/v1/users/{username}/public-key`
+**响应格式：**
+```json
+{
+  "identity_public_key": "用户身份公钥"
+}
+```
+
+#### **发送好友请求** `POST /api/v1/friend-requests`
+**请求格式：**
+```json
+{
+  "to_user": "目标用户名"
+}
+```
+
+**响应格式：**
+```json
+{
+  "request_id": "好友请求ID"
+}
+```
+
+### **2. WebSocket消息JSON格式**
+
+#### **连接参数**
+```
+ws://host:port/api/v1/ws?token=JWT_TOKEN
+```
+
+#### **发送消息格式**
+```json
+{
+  "type": "message",
+  "message_id": "消息唯一ID",
+  "sender_id": "发送者用户名",
+  "receiver_id": "接收者用户名",
+  "ciphertext_b64": "Base64编码的密文",
+  "nonce_b64": "Base64编码的随机数",
+  "mac_tag_b64": "Base64编码的认证标签",
+  "ad_serialized": "序列化的关联数据",
+  "timestamp": 时间戳,
+  "ttl_seconds": 生存时间（秒）
+}
+```
+
+#### **接收消息格式**
+```json
+{
+  "type": "message",
+  "message_id": "消息唯一ID",
+  "sender_id": "发送者用户名",
+  "receiver_id": "接收者用户名",
+  "ciphertext_b64": "Base64编码的密文",
+  "nonce_b64": "Base64编码的随机数",
+  "mac_tag_b64": "Base64编码的认证标签",
+  "ad_serialized": "序列化的关联数据",
+  "timestamp": 时间戳,
+  "ttl_seconds": 生存时间（秒）,
+  "status": "delivered"
+}
+```
+
+#### **消息确认格式**
+```json
+{
+  "type": "ack",
+  "message_id": "消息ID",
+  "status": "read/delivered"
+}
+```
+
+#### **好友请求通知格式**
+```json
+{
+  "type": "friend_request",
+  "request_id": "请求ID",
+  "from_user": "发送者用户名",
+  "timestamp": 时间戳
+}
+```
+
+### **3. EncryptedNetworkPackage结构**
+```json
+{
+  "message_id": "用于服务器追踪和状态更新",
+  "sender_id": "用于服务器查出是谁发的",
+  "receiver_id": "用于服务器路由或存入离线队列",
+  "ciphertext_b64": "加密后的有效载荷，Base64编码",
+  "nonce_b64": "随机数 (IV/Nonce)，Base64编码",
+  "mac_tag_b64": "认证标签，Base64编码",
+  "ad_serialized": "序列化后的元数据（明文，供接收方提取并验证）",
+  "timestamp": "发送时间戳",
+  "ttl_seconds": "消息生存时间（秒）",
+  "status": "消息状态: sent/delivered/read/expired"
+}
+```
+
+### **4. 错误响应格式**
+```json
+{
+  "error": "错误描述"
+}
+```
+
+### **5. 认证要求**
+- **REST API**: 需要在Header中包含 `Authorization: Bearer <JWT_TOKEN>`
+- **WebSocket**: 需要在连接URL中包含 `token` 参数
+

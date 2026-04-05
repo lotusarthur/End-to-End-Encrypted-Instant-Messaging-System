@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Set
 
 from database_manager import DatabaseManager
-from models import User, Message, FriendRelationship, DatabaseSchema
+from models import User, Message, FriendRelationship, DatabaseSchema, EncryptedNetworkPackage
 from message_manager import MessageManager
 
 class MockWebSocket:
@@ -190,16 +190,34 @@ class TestScenarioRunner:
         self.db_manager.update_user_online_status("alice", True)
         self.db_manager.update_user_online_status("bob", True)
         
-        # Alice向Bob发送消息
+        # Alice向Bob发送EncryptedNetworkPackage格式的消息
         message_id = str(uuid.uuid4())
+        timestamp = int(time.time())
+        
+        # 创建完整的EncryptedNetworkPackage
+        encrypted_package = EncryptedNetworkPackage(
+            message_id=message_id,
+            sender_id="alice",
+            receiver_id="bob",
+            ciphertext_b64="ZW5jcnlwdGVkX29ubGluZV9tZXNzYWdlX2NvbnRlbnQ=",  # Base64编码的密文
+            nonce_b64="bm9uY2VfZm9yX29ubGluZV9tZXNzYWdl",
+            mac_tag_b64="bWFjX3RhZ19mb3Jfb25saW5lX21lc3NhZ2U=",
+            ad_serialized='{"message_type": "text", "version": "1.0"}',
+            timestamp=timestamp,
+            ttl_seconds=3600,
+            status="sent"
+        )
+        
+        # 转换为Message格式存储（保持向后兼容）
         message = Message(
             message_id=message_id,
             from_user="alice",
             to_user="bob",
-            ciphertext="加密的在线消息内容",
-            timestamp=int(time.time()),
+            ciphertext=encrypted_package.ciphertext_b64,
+            timestamp=timestamp,
             ttl_seconds=3600,
-            status="sent"
+            status="sent",
+            signature=encrypted_package.mac_tag_b64
         )
         
         # 保存消息到数据库
@@ -207,16 +225,33 @@ class TestScenarioRunner:
         
         if success:
             print("✓ 在线消息保存成功")
+            print(f"  消息ID: {message_id}")
+            print(f"  发送者: alice -> 接收者: bob")
+            print(f"  密文: {encrypted_package.ciphertext_b64[:30]}...")
             
-            # 模拟实时消息投递
-            await self._deliver_message_to_online_user(message)
+            # 模拟实时消息投递（使用EncryptedNetworkPackage格式）
+            await self._deliver_encrypted_message_to_online_user(encrypted_package)
             
-            # 验证Bob是否收到消息
+            # 验证Bob是否收到完整的EncryptedNetworkPackage消息
             if len(bob_ws.messages) > 0:
-                print("✓ 在线消息实时投递成功")
-                print(f"  Bob收到消息: {bob_ws.messages[-1]}")
+                last_message = bob_ws.messages[-1]
+                
+                # 验证消息结构
+                required_fields = ['message_id', 'sender_id', 'receiver_id', 'ciphertext_b64', 
+                                  'nonce_b64', 'mac_tag_b64', 'ad_serialized']
+                
+                if all(field in last_message for field in required_fields):
+                    print("✓ 在线消息实时投递成功")
+                    print(f"  Bob收到完整的EncryptedNetworkPackage消息")
+                    print(f"  消息ID: {last_message['message_id']}")
+                    print(f"  发送者: {last_message['sender_id']}")
+                    print(f"  接收者: {last_message['receiver_id']}")
+                else:
+                    print("✗ 在线消息投递失败 - 消息结构不完整")
+                    print(f"  收到的消息: {last_message}")
+                    return False
             else:
-                print("✗ 在线消息投递失败")
+                print("✗ 在线消息投递失败 - Bob未收到消息")
                 return False
         else:
             print("✗ 在线消息保存失败")
@@ -234,16 +269,34 @@ class TestScenarioRunner:
             del self.online_users["bob"]
         self.db_manager.update_user_online_status("bob", False)
         
-        # Alice向离线Bob发送消息
+        # Alice向离线Bob发送EncryptedNetworkPackage格式的消息
         message_id = str(uuid.uuid4())
+        timestamp = int(time.time())
+        
+        # 创建完整的EncryptedNetworkPackage
+        encrypted_package = EncryptedNetworkPackage(
+            message_id=message_id,
+            sender_id="alice",
+            receiver_id="bob",
+            ciphertext_b64="ZW5jcnlwdGVkX29mZmxpbmVfbWVzc2FnZV9jb250ZW50",  # Base64编码的密文
+            nonce_b64="bm9uY2VfZm9yX29mZmxpbmVfbWVzc2FnZQ==",
+            mac_tag_b64="bWFjX3RhZ19mb3Jfb2ZmbGluZV9tZXNzYWdl",
+            ad_serialized='{"message_type": "text", "version": "1.0"}',
+            timestamp=timestamp,
+            ttl_seconds=3600,
+            status="sent"
+        )
+        
+        # 转换为Message格式存储
         message = Message(
             message_id=message_id,
             from_user="alice",
             to_user="bob",
-            ciphertext="加密的离线消息内容",
-            timestamp=int(time.time()),
+            ciphertext=encrypted_package.ciphertext_b64,
+            timestamp=timestamp,
             ttl_seconds=3600,
-            status="sent"
+            status="sent",
+            signature=encrypted_package.mac_tag_b64
         )
         
         # 保存消息到数据库
@@ -251,6 +304,9 @@ class TestScenarioRunner:
         
         if success:
             print("✓ 离线消息保存成功")
+            print(f"  消息ID: {message_id}")
+            print(f"  发送者: alice -> 接收者: bob")
+            print(f"  密文: {encrypted_package.ciphertext_b64[:30]}...")
             
             # 标记消息为已发送但未投递
             await self.message_manager.mark_message_sent(message_id, "alice", "bob")
@@ -269,6 +325,14 @@ class TestScenarioRunner:
                 message_found = any(msg.message_id == message_id for msg in offline_messages)
                 if message_found:
                     print("✓ 离线消息状态正确")
+                    
+                    # 验证离线消息包含完整的EncryptedNetworkPackage字段
+                    offline_message = next((msg for msg in offline_messages if msg.message_id == message_id), None)
+                    if offline_message and offline_message.ciphertext == encrypted_package.ciphertext_b64:
+                        print("✓ 离线消息内容正确")
+                    else:
+                        print("✗ 离线消息内容不正确")
+                        return False
                 else:
                     print("✗ 离线消息状态不正确")
                     return False
@@ -298,9 +362,23 @@ class TestScenarioRunner:
         if offline_messages:
             print(f"✓ 发现 {len(offline_messages)} 条离线消息")
             
-            # 投递离线消息
+            # 投递离线消息（使用EncryptedNetworkPackage格式）
             for message in offline_messages:
-                await self._deliver_message_to_online_user(message)
+                # 从离线消息重建EncryptedNetworkPackage
+                encrypted_package = EncryptedNetworkPackage(
+                    message_id=message.message_id,
+                    sender_id=message.from_user,
+                    receiver_id=message.to_user,
+                    ciphertext_b64=message.ciphertext,
+                    nonce_b64="bm9uY2VfZm9yX29mZmxpbmVfbWVzc2FnZQ==",  # 模拟nonce
+                    mac_tag_b64=message.signature or "bWFjX3RhZ19mb3Jfb2ZmbGluZV9tZXNzYWdl",
+                    ad_serialized='{"message_type": "text", "version": "1.0"}',
+                    timestamp=message.timestamp,
+                    ttl_seconds=message.ttl_seconds,
+                    status="delivered"
+                )
+                
+                await self._deliver_encrypted_message_to_online_user(encrypted_package)
                 
                 # 更新消息状态为已送达
                 self.db_manager.update_message_status(message.message_id, "delivered")
@@ -310,9 +388,28 @@ class TestScenarioRunner:
             if len(bob_ws.messages) >= len(offline_messages):
                 print("✓ 所有离线消息成功投递")
                 
-                # 显示收到的消息
-                for i, msg_data in enumerate(bob_ws.messages[-len(offline_messages):]):
-                    print(f"  消息{i+1}: {msg_data.get('content', 'N/A')}")
+                # 验证收到的消息格式
+                encrypted_messages = bob_ws.messages[-len(offline_messages):]
+                valid_encrypted_count = 0
+                
+                for i, msg_data in enumerate(encrypted_messages):
+                    # 检查是否包含EncryptedNetworkPackage的必需字段
+                    required_fields = ['message_id', 'sender_id', 'receiver_id', 'ciphertext_b64', 
+                                      'nonce_b64', 'mac_tag_b64', 'ad_serialized']
+                    
+                    if all(field in msg_data for field in required_fields):
+                        valid_encrypted_count += 1
+                        print(f"  消息{i+1}: 完整的EncryptedNetworkPackage格式")
+                        print(f"    发送者: {msg_data['sender_id']} -> 接收者: {msg_data['receiver_id']}")
+                        print(f"    密文: {msg_data['ciphertext_b64'][:30]}...")
+                    else:
+                        print(f"  消息{i+1}: 格式不完整")
+                
+                if valid_encrypted_count == len(offline_messages):
+                    print("✓ 所有离线消息均为完整的EncryptedNetworkPackage格式")
+                else:
+                    print(f"✗ 只有 {valid_encrypted_count}/{len(offline_messages)} 条消息格式正确")
+                    return False
                 
                 # 验证消息状态已更新 - 通过重新获取离线消息列表来验证状态更新
                 updated_offline_messages = self.db_manager.get_offline_messages("bob")
@@ -332,7 +429,7 @@ class TestScenarioRunner:
         return True
     
     async def _deliver_message_to_online_user(self, message: Message):
-        """向在线用户投递消息"""
+        """向在线用户投递消息（兼容旧格式）"""
         if message.to_user in self.online_users:
             ws = self.online_users[message.to_user]
             message_data = {
@@ -341,6 +438,25 @@ class TestScenarioRunner:
                 "from": message.from_user,
                 "content": message.ciphertext,
                 "timestamp": message.timestamp
+            }
+            await ws.send(json.dumps(message_data))
+    
+    async def _deliver_encrypted_message_to_online_user(self, encrypted_package: EncryptedNetworkPackage):
+        """向在线用户投递EncryptedNetworkPackage格式的消息"""
+        if encrypted_package.receiver_id in self.online_users:
+            ws = self.online_users[encrypted_package.receiver_id]
+            message_data = {
+                "type": "message",
+                "message_id": encrypted_package.message_id,
+                "sender_id": encrypted_package.sender_id,
+                "receiver_id": encrypted_package.receiver_id,
+                "ciphertext_b64": encrypted_package.ciphertext_b64,
+                "nonce_b64": encrypted_package.nonce_b64,
+                "mac_tag_b64": encrypted_package.mac_tag_b64,
+                "ad_serialized": encrypted_package.ad_serialized,
+                "timestamp": encrypted_package.timestamp,
+                "ttl_seconds": encrypted_package.ttl_seconds,
+                "status": "delivered"
             }
             await ws.send(json.dumps(message_data))
     

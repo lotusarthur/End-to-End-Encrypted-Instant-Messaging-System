@@ -17,7 +17,10 @@ class DatabaseManager:
     
     def _get_connection(self) -> sqlite3.Connection:
         """获取数据库连接"""
-        return sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        # 启用外键约束
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
     
     # ========== 用户管理 ==========
     
@@ -75,6 +78,16 @@ class DatabaseManager:
     
     def add_friend_request(self, from_user: str, to_user: str) -> Optional[int]:
         """添加好友请求"""
+        # 检查用户是否存在
+        if not self.get_user(from_user) or not self.get_user(to_user):
+            return None
+        
+        # 检查是否已经发送过好友请求
+        existing_requests = self.get_friend_requests(from_user, "sent")
+        for req in existing_requests:
+            if req.user_b == to_user and req.status == "pending":
+                return None
+        
         try:
             conn = self._get_connection()
             cursor = conn.cursor()

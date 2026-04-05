@@ -27,7 +27,7 @@ class FriendRelationship:
     id: int
     user_a: str
     user_b: str
-    status: str  # 'pending', 'accepted', 'blocked'
+    status: str  # 'pending', 'accepted', 'declined', 'cancelled'
     created_at: int
     accepted_at: Optional[int] = None
 
@@ -52,6 +52,24 @@ class UserPublicKey:
     identity_public_key: str
     updated_at: int
     prekey_bundle: Optional[str] = None
+
+@dataclass
+class EncryptedNetworkPackage:
+    """加密网络包 - 符合要求的消息格式"""
+    message_id: str           # 用于服务器追踪和状态更新
+    sender_id: str            # 用于服务器查出是谁发的
+    receiver_id: str          # 用于服务器路由或存入离线队列
+    
+    # 密码学核心字段
+    ciphertext_b64: str       # 加密后的有效载荷，Base64编码
+    nonce_b64: str            # 随机数 (IV/Nonce)，Base64编码
+    mac_tag_b64: str          # 认证标签，Base64编码
+    ad_serialized: str        # 序列化后的元数据（明文，供接收方提取并验证）
+    
+    # 服务器管理字段
+    timestamp: int            # 发送时间戳
+    ttl_seconds: int          # 消息生存时间（秒）
+    status: str = 'sent'      # 消息状态: sent/delivered/read/expired
 
 class DatabaseSchema:
     """数据库表结构定义"""
@@ -81,7 +99,7 @@ class DatabaseSchema:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_a TEXT NOT NULL,
                 user_b TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('pending', 'accepted', 'blocked', 'cancelled')),
+                status TEXT NOT NULL CHECK(status IN ('pending', 'accepted', 'declined', 'cancelled')),
                 created_at INTEGER NOT NULL,
                 accepted_at INTEGER,
                 FOREIGN KEY (user_a) REFERENCES users(username),
