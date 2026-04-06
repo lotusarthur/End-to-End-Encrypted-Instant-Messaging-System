@@ -22,6 +22,7 @@ from dataclasses import dataclass, asdict
 # 导入统一的数据库管理器
 from database_manager import DatabaseManager
 from models import DatabaseSchema, User, FriendRelationship, Message
+from security_utils import security
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -88,6 +89,26 @@ class MessagingServer:
         self.ws_manager = WebSocketManager()
         self.app = web.Application()
         self._setup_routes()
+        self._setup_middleware()
+    
+    def _setup_middleware(self):
+        """设置中间件"""
+        # 添加内容安全策略中间件
+        async def csp_middleware(request, handler):
+            response = await handler(request)
+            
+            # 添加CSP头
+            response.headers['Content-Security-Policy'] = security.get_csp_header()
+            
+            # 添加其他安全头
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            response.headers['X-Frame-Options'] = 'DENY'
+            response.headers['X-XSS-Protection'] = '1; mode=block'
+            
+            return response
+        
+        # 注册中间件
+        self.app.middlewares.append(csp_middleware)
     
     def _setup_routes(self):
         """设置API路由"""
@@ -168,6 +189,13 @@ class MessagingServer:
             
             if not username or not password:
                 return web.json_response({'error': 'Username and password cannot be empty'}, status=400)
+            
+            # XSS安全防护：用户名验证和清理
+            sanitized_username = security.sanitize_username(username)
+            if not sanitized_username:
+                return web.json_response({'error': 'Invalid username format. Username must be 3-20 characters and contain only letters, numbers, underscores, and hyphens.'}, status=400)
+            
+            username = sanitized_username
             
             # 检查用户是否已存在
             if self.db.get_user(username):
@@ -325,6 +353,13 @@ class MessagingServer:
         
         if not to_user:
             return web.json_response({'error': '目标用户不能为空'}, status=400)
+        
+        # XSS安全防护：目标用户名验证和清理
+        sanitized_to_user = security.sanitize_username(to_user)
+        if not sanitized_to_user:
+            return web.json_response({'error': 'Invalid target username format'}, status=400)
+        
+        to_user = sanitized_to_user
         
         if to_user == user.username:
             return web.json_response({'error': '不能添加自己为好友'}, status=400)
