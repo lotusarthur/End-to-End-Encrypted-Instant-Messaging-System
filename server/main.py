@@ -159,7 +159,7 @@ class MessagingServer:
                     data = json.loads(fixed_body)
                 except Exception as fix_error:
                     logger.error(f"JSON修复失败: {fix_error}")
-                    return web.json_response({'error': '无效的JSON格式，请使用标准JSON格式：{"username":"testuser","password":"testpass"}'}, status=400)
+                    return web.json_response({'error': 'Invalid JSON format. Please use standard JSON format: {"username":"testuser","password":"testpass"}'}, status=400)
             
             username = data.get('username')
             password = data.get('password')
@@ -167,11 +167,11 @@ class MessagingServer:
             otp_secret = data.get('otp_secret')
             
             if not username or not password:
-                return web.json_response({'error': '用户名和密码不能为空'}, status=400)
+                return web.json_response({'error': 'Username and password cannot be empty'}, status=400)
             
             # 检查用户是否已存在
             if self.db.get_user(username):
-                return web.json_response({'error': '用户已存在'}, status=400)
+                return web.json_response({'error': 'User already exists'}, status=400)
             
             # 创建用户 - 使用models.py中的User类
             password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -191,14 +191,14 @@ class MessagingServer:
                 
                 return web.json_response({
                     'user_id': username,
-                    'message': '注册成功'
+                    'message': 'Registration successful'
                 }, status=201)
             else:
-                return web.json_response({'error': '注册失败'}, status=500)
+                return web.json_response({'error': 'Registration failed'}, status=500)
                 
         except Exception as e:
             logger.error(f"注册失败: {e}")
-            return web.json_response({'error': '服务器内部错误'}, status=500)
+            return web.json_response({'error': 'Internal server error'}, status=500)
     
     async def login(self, request: web.Request) -> web.Response:
         """用户登录"""
@@ -233,18 +233,18 @@ class MessagingServer:
                 
         except Exception as e:
             logger.error(f"登录失败: {e}")
-            return web.json_response({'error': '服务器内部错误'}, status=500)
+            return web.json_response({'error': 'Internal server error'}, status=500)
     
     async def logout(self, request: web.Request) -> web.Response:
         """用户登出"""
         user = await self._get_user_from_token(request)
         if not user:
-            return web.json_response({'error': '未授权'}, status=401)
+            return web.json_response({'error': 'Unauthorized'}, status=401)
         
         # 更新在线状态
         self.db.update_user_online_status(user.username, False)
         
-        return web.json_response({'message': '登出成功'})
+        return web.json_response({'message': 'Logout successful'})
     
     async def refresh_token(self, request: web.Request) -> web.Response:
         """刷新token"""
