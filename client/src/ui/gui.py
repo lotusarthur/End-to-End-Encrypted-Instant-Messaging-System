@@ -1,541 +1,557 @@
-"""
-端到端加密即时通讯系统 - 客户端主入口
-
-这是一个完整的客户端系统，包含：
-- 用户注册/登录功能
-- 端到端加密消息传输
-- 好友管理系统
-- 历史消息同步
-- 命令行界面和UI接口两套接口
-"""
+# client/src/ui/gui.py
 
 import sys
 import os
-import asyncio
-from pathlib import Path
-from typing import Dict, List, Optional, Callable, Any
+import threading
+from datetime import datetime
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
 
-# 添加当前目录到Python路径
-current_dir = Path(__file__).resolve().parent
-sys.path.insert(0, str(current_dir))
+# 添加路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+client_src_dir = os.path.dirname(current_dir)
+project_root = os.path.dirname(os.path.dirname(client_src_dir))
 
-# 导入业务层服务
-try:
-    from business.app_service import AppService
-    from business.auth_service import AuthService
-    from business.chat_service import ChatService
-    from business.message_service import MessageService
-    from business.session_manager import SessionManager
-    from business.errors import AuthError, ValidationError
-    from storage.db import LocalDatabase
-    from network.api_client import NetworkClient
-    from crypto.message_crypto import MessageCrypto
-    from crypto.key_manager import KeyManager
-except ImportError as e:
-    print(f"导入模块失败: {e}")
-    # 创建占位类以便继续开发
-    class AppService:
-        def __init__(self, *args, **kwargs):
-            pass
-        def register(self, username: str, password: str):
-            return {"success": False, "error": "模块导入失败，无法注册"}
-        def login(self, username: str, password: str, otp: str):
-            return {"success": False, "error": "模块导入失败，无法登录"}
-        def logout(self):
-            pass
-        def send_text_message(self, conversation_id: str, text: str, ttl: int = 30):
-            return {"success": False, "error": "模块导入失败，无法发送消息"}
-        def list_conversations(self):
-            return []
-        def list_messages(self, conversation_id: str, limit: int = 50):
-            return []
-        def open_conversation(self, conversation_id: str):
-            pass
-        def on(self, event_name: str, handler):
-            pass
-    class AuthService:
-        def __init__(self, *args, **kwargs):
-            pass
-    class ChatService:
-        def __init__(self, *args, **kwargs):
-            pass
-    class MessageService:
-        def __init__(self, *args, **kwargs):
-            pass
-    class SessionManager:
-        def __init__(self, *args, **kwargs):
-            pass
-    class LocalDatabase:
-        def __init__(self, *args, **kwargs):
-            pass
-        def save_private_key(self, user_id: str, private_key: str):
-            pass
-        def get_private_key(self, user_id: str):
-            return None
-        def save_user_profile(self, profile: dict):
-            pass
-        def get_user_profile(self, user_id: str):
-            return None
-        def save_token(self, token: str):
-            pass
-    class NetworkClient:
-        def __init__(self, *args, **kwargs):
-            pass
-    class MessageCrypto:
-        def __init__(self, *args, **kwargs):
-            pass
-    class KeyManager:
-        def __init__(self, *args, **kwargs):
-            pass
+for path in [client_src_dir, project_root]:
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+from main import InstantMessagingClient, UIController
 
 
-class EventBus:
-    """简单的事件总线实现"""
-    def __init__(self):
-        self._handlers = {}
+class ChatGUI(QMainWindow):
+    """端到端加密聊天图形界面"""
     
-    def subscribe(self, event_name: str, handler: Callable):
-        """订阅事件"""
-        if event_name not in self._handlers:
-            self._handlers[event_name] = []
-        self._handlers[event_name].append(handler)
-    
-    def emit(self, event_name: str, data: Dict):
-        """触发事件"""
-        if event_name in self._handlers:
-            for handler in self._handlers[event_name]:
-                try:
-                    handler(data)
-                except Exception as e:
-                    print(f"事件处理错误 {event_name}: {e}")
-
-
-class InstantMessagingClient:
-    """端到端加密即时通讯客户端主类"""
-    
-    def __init__(self, server_url: str = "https://ungladly-cremasterial-spring.ngrok-free.dev"):
-        self.server_url = server_url
-        self.base_dir = Path(__file__).resolve().parent
-        self.storage_dir = str(self.base_dir / ".secure_store")
-        self.db_path = str(self.base_dir / "chat.db")
+    def __init__(self, server_url: str = "http://localhost:80"):
+        super().__init__()
         
-        # 确保存储目录存在
-        os.makedirs(self.storage_dir, exist_ok=True)
+        # 初始化客户端
+        self.client = InstantMessagingClient(server_url)
+        self.ui_controller = UIController(self.client)
         
-        # 初始化核心组件
-        self._initialize_components()
-        
-        # UI回调函数
-        self.ui_callbacks: Dict[str, Callable] = {}
-        
-        # 当前用户状态
-        self.current_user: Optional[Dict] = None
-        self.is_authenticated = False
-        
-        print(f"Instant Messaging Client initialized. Server: {server_url}")
-    
-    def _initialize_components(self):
-        """初始化所有核心组件"""
-        # 事件总线
-        self.event_bus = EventBus()
-        
-        # 存储组件
-        self.storage = LocalDatabase(self.db_path)
-        
-        # 网络组件
-        self.api_client = NetworkClient(self.server_url)
-        
-        # 加密组件
-        self.crypto = MessageCrypto()
-        
-        # 会话管理
-        self.session_manager = SessionManager(self.storage)
-        
-        # 业务服务
-        self.auth_service = AuthService(
-            self.api_client, None, self.storage, self.event_bus, self.crypto
-        )
-        
-        self.chat_service = ChatService(
-            self.crypto, self.api_client, self.storage, self.event_bus, self.session_manager
-        )
-        
-        self.message_service = MessageService(
-            self.crypto, self.storage, self.event_bus, self.session_manager
-        )
-        
-        # 主应用服务
-        self.app_service = AppService(
-            auth_service=self.auth_service,
-            chat_service=self.chat_service,
-            message_service=self.message_service,
-            session_manager=self.session_manager,
-            event_bus=self.event_bus,
-            ws_client=None,  # WebSocket客户端暂未实现
-            storage=self.storage
-        )
-        
-        # 注册事件监听
-        self._register_event_handlers()
-        
-        print("所有核心组件初始化完成")
-    
-    def _register_event_handlers(self):
-        """注册事件处理器"""
-        # 认证事件
-        self.event_bus.subscribe("auth.login_success", self._on_login_success)
-        self.event_bus.subscribe("auth.logout", self._on_logout)
-        
-        # 聊天事件
-        self.event_bus.subscribe("chat.message_received", self._on_message_received)
-        self.event_bus.subscribe("chat.message_sent", self._on_message_sent)
-        self.event_bus.subscribe("chat.message_failed", self._on_message_failed)
-    
-    def _on_login_success(self, data: Dict):
-        """登录成功处理"""
-        self.is_authenticated = True
-        self.current_user = data.get("profile", {})
-        print(f"用户登录成功: {self.current_user.get('username')}")
-    
-    def _on_logout(self, data: Dict):
-        """登出处理"""
-        self.is_authenticated = False
         self.current_user = None
-        print("用户已登出")
-    
-    def _on_message_received(self, data: Dict):
-        """收到消息处理"""
-        print(f"收到新消息: {data.get('text')}")
-    
-    def _on_message_sent(self, data: Dict):
-        """消息发送成功处理"""
-        print(f"消息发送成功: {data.get('message_id')}")
-    
-    def _on_message_failed(self, data: Dict):
-        """消息发送失败处理"""
-        print(f"消息发送失败: {data.get('error')}")
-    
-    # ========== UI接口方法 ==========
-    
-    def register_ui_callback(self, event_name: str, callback: Callable):
-        """注册UI回调函数"""
-        self.ui_callbacks[event_name] = callback
-        self.event_bus.subscribe(event_name, callback)
-    
-    def unregister_ui_callback(self, event_name: str):
-        """注销UI回调函数"""
-        if event_name in self.ui_callbacks:
-            del self.ui_callbacks[event_name]
-    
-    # ========== 业务方法封装 ==========
-    
-    def register(self, username: str, password: str) -> Dict:
-        """用户注册"""
-        try:
-            return self.app_service.register(username, password)
-        except Exception as e:
-            print(f"注册失败: {e}")
-            return {"success": False, "error": str(e)}
-    
-    def login(self, username: str, password: str, otp: str) -> Dict:
-        """用户登录"""
-        try:
-            return self.app_service.login(username, password, otp)
-        except Exception as e:
-            print(f"登录失败: {e}")
-            return {"success": False, "error": str(e)}
-    
-    def logout(self):
-        """用户登出"""
-        try:
-            self.app_service.logout()
-        except Exception as e:
-            print(f"登出失败: {e}")
-    
-    def send_message(self, conversation_id: str, text: str, ttl: int = 30) -> Dict:
-        """发送消息"""
-        try:
-            return self.app_service.send_text_message(conversation_id, text, ttl)
-        except Exception as e:
-            print(f"发送消息失败: {e}")
-            return {"success": False, "error": str(e)}
-    
-    def list_conversations(self) -> List[Dict]:
-        """获取对话列表"""
-        try:
-            return self.app_service.list_conversations()
-        except Exception as e:
-            print(f"获取对话列表失败: {e}")
-            return []
-    
-    def list_messages(self, conversation_id: str, limit: int = 50) -> List[Dict]:
-        """获取对话消息"""
-        try:
-            return self.app_service.list_messages(conversation_id, limit)
-        except Exception as e:
-            print(f"获取消息失败: {e}")
-            return []
-    
-    def open_conversation(self, conversation_id: str):
-        """打开对话"""
-        try:
-            self.app_service.open_conversation(conversation_id)
-        except Exception as e:
-            print(f"打开对话失败: {e}")
-    
-    def get_user_status(self) -> Dict:
-        """获取用户状态"""
-        return {
-            "is_authenticated": self.is_authenticated,
-            "current_user": self.current_user,
-            "server_url": self.server_url
-        }
-
-
-class CommandLineInterface:
-    """命令行界面"""
-    
-    def __init__(self, client: InstantMessagingClient):
-        self.client = client
-        self.running = False
-    
-    def start(self):
-        """启动命令行界面"""
-        self.running = True
-        print("\n=== 命令行界面已启动 ===")
-        print("输入 'help' 查看可用命令")
+        self.current_conversation = None
+        self.friend_to_conv_id = {}
         
-        while self.running:
-            try:
-                command = input("\ncmd> ").strip()
-                if not command:
-                    continue
-                
-                self._handle_command(command)
-                
-            except KeyboardInterrupt:
-                print("\n\n正在退出...")
-                self.running = False
-            except Exception as e:
-                print(f"命令执行错误: {e}")
+        self.setup_ui()
+        self.setup_events()
+        
+        # 消息轮询线程
+        self.polling_running = False
+        self.polling_thread = None
     
-    def _handle_command(self, command: str):
-        """处理命令"""
-        parts = command.split()
-        cmd = parts[0].lower()
+    def setup_ui(self):
+        """设置界面"""
+        self.setWindowTitle("Secure Chat - End-to-End Encrypted Messenger")
+        self.setGeometry(100, 100, 900, 600)
         
-        if cmd == "exit":
-            self.running = False
-            print("退出命令行界面")
+        # 主窗口部件
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
         
-        elif cmd == "help":
-            self._show_help()
+        # 主布局
+        main_layout = QHBoxLayout(central_widget)
         
-        elif cmd == "status":
-            status = self.client.get_user_status()
-            print(f"当前状态: {status}")
+        # ========== 左侧面板（会话/好友列表） ==========
+        left_panel = QWidget()
+        left_panel.setMaximumWidth(280)
+        left_layout = QVBoxLayout(left_panel)
         
-        elif cmd == "register":
-            if len(parts) < 3:
-                print("用法: register <用户名> <密码>")
-                return
-            username, password = parts[1], parts[2]
-            result = self.client.register(username, password)
-            print(f"注册结果: {result}")
+        # 用户信息区域
+        self.user_label = QLabel("未登录")
+        self.user_label.setStyleSheet("font-weight: bold; padding: 10px; background-color: #2c3e50; color: white;")
+        left_layout.addWidget(self.user_label)
         
-        elif cmd == "login":
-            if len(parts) < 4:
-                print("用法: login <用户名> <密码> <OTP码>")
-                return
-            username, password, otp = parts[1], parts[2], parts[3]
-            result = self.client.login(username, password, otp)
-            print(f"登录结果: {result}")
+        # 标签页
+        self.tab_widget = QTabWidget()
+        self.tab_widget.addTab(self.create_conversations_tab(), "会话")
+        self.tab_widget.addTab(self.create_friends_tab(), "好友")
+        left_layout.addWidget(self.tab_widget)
         
-        elif cmd == "logout":
-            self.client.logout()
-            print("已登出")
+        # 按钮区域
+        btn_layout = QHBoxLayout()
+        self.add_friend_btn = QPushButton("添加好友")
+        self.refresh_btn = QPushButton("刷新")
+        self.logout_btn = QPushButton("登出")
+        btn_layout.addWidget(self.add_friend_btn)
+        btn_layout.addWidget(self.refresh_btn)
+        btn_layout.addWidget(self.logout_btn)
+        left_layout.addLayout(btn_layout)
         
-        elif cmd == "send":
-            if len(parts) < 3:
-                print("用法: send <对话ID> <消息内容>")
-                return
-            conversation_id, text = parts[1], " ".join(parts[2:])
-            result = self.client.send_message(conversation_id, text)
-            print(f"发送结果: {result}")
+        # ========== 右侧面板（聊天区域） ==========
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
         
-        elif cmd == "conversations":
-            conversations = self.client.list_conversations()
-            print(f"对话列表 ({len(conversations)}个):")
-            for conv in conversations:
-                print(f"  - {conv.get('conversation_id')}: {conv.get('last_message', '')}")
+        # 聊天标题
+        self.chat_title = QLabel("请选择会话")
+        self.chat_title.setStyleSheet("font-weight: bold; padding: 10px; background-color: #34495e; color: white;")
+        right_layout.addWidget(self.chat_title)
         
-        elif cmd == "messages":
-            if len(parts) < 2:
-                print("用法: messages <对话ID>")
-                return
-            conversation_id = parts[1]
-            messages = self.client.list_messages(conversation_id)
-            print(f"消息列表 ({len(messages)}条):")
-            for msg in messages:
-                direction = "→" if msg.get('direction') == 'outgoing' else "←"
-                print(f"  {direction} {msg.get('text')}")
+        # 消息显示区域
+        self.messages_text = QTextEdit()
+        self.messages_text.setReadOnly(True)
+        self.messages_text.setStyleSheet("font-family: monospace; font-size: 12px;")
+        right_layout.addWidget(self.messages_text)
         
+        # 消息输入区域
+        input_layout = QHBoxLayout()
+        self.message_input = QTextEdit()
+        self.message_input.setMaximumHeight(80)
+        self.message_input.setPlaceholderText("输入消息...")
+        
+        self.ttl_spin = QSpinBox()
+        self.ttl_spin.setRange(5, 3600)
+        self.ttl_spin.setValue(30)
+        self.ttl_spin.setSuffix(" 秒")
+        self.ttl_spin.setToolTip("消息自毁时间")
+        
+        self.send_btn = QPushButton("发送")
+        self.send_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+        
+        input_layout.addWidget(self.message_input, 4)
+        input_layout.addWidget(self.ttl_spin, 1)
+        input_layout.addWidget(self.send_btn, 1)
+        right_layout.addLayout(input_layout)
+        
+        # 组装
+        main_layout.addWidget(left_panel, 1)
+        main_layout.addWidget(right_panel, 2)
+        
+        # ========== 登录对话框 ==========
+        self.login_dialog = LoginDialog(self)
+        self.login_dialog.login_signal.connect(self.do_login)
+        
+        # ========== 添加好友对话框 ==========
+        self.add_friend_dialog = AddFriendDialog(self)
+        self.add_friend_dialog.add_friend_signal.connect(self.do_add_friend)
+        
+        # 连接信号
+        self.send_btn.clicked.connect(self.send_message)
+        self.add_friend_btn.clicked.connect(self.show_add_friend_dialog)
+        self.refresh_btn.clicked.connect(self.refresh_all)
+        self.logout_btn.clicked.connect(self.do_logout)
+        
+        # 显示登录对话框
+        self.login_dialog.show()
+    
+    def create_conversations_tab(self) -> QWidget:
+        """创建会话列表标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        self.conversations_list = QListWidget()
+        self.conversations_list.itemClicked.connect(self.on_conversation_selected)
+        layout.addWidget(self.conversations_list)
+        
+        return widget
+    
+    def create_friends_tab(self) -> QWidget:
+        """创建好友列表标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        self.friends_list = QListWidget()
+        self.friends_list.itemClicked.connect(self.on_friend_selected)
+        layout.addWidget(self.friends_list)
+        
+        return widget
+    
+    def setup_events(self):
+        """设置事件回调"""
+        self.ui_controller.ui_register_callback("auth.login_success", self.on_login_success)
+        self.ui_controller.ui_register_callback("auth.logout", self.on_logout)
+        self.ui_controller.ui_register_callback("chat.message_received", self.on_message_received)
+        self.ui_controller.ui_register_callback("chat.message_sent", self.on_message_sent)
+        self.ui_controller.ui_register_callback("chat.message_failed", self.on_message_failed)
+        self.ui_controller.ui_register_callback("friend_request_received", self.on_friend_request)
+    
+    # ========== 事件处理 ==========
+    
+    def on_login_success(self, data: dict):
+        """登录成功"""
+        self.current_user = data.get('profile', {}).get('username', 'User')
+        self.user_label.setText(f"用户: {self.current_user}")
+        self.chat_title.setText("请选择会话")
+        self.refresh_all()
+        
+        # 启动消息轮询
+        self.start_polling()
+    
+    def on_logout(self, data: dict):
+        """登出"""
+        self.current_user = None
+        self.user_label.setText("未登录")
+        self.conversations_list.clear()
+        self.friends_list.clear()
+        self.messages_text.clear()
+        self.chat_title.setText("请选择会话")
+        
+        # 停止轮询
+        self.stop_polling()
+        
+        # 显示登录对话框
+        self.login_dialog.show()
+    
+    def on_message_received(self, data: dict):
+        """收到新消息"""
+        sender = data.get('sender_id', 'Unknown')
+        text = data.get('text', '')
+        
+        # 如果当前正在和这个发件人聊天，立即显示
+        if self.current_conversation == sender:
+            self.add_message_to_display(sender, text, is_from_me=False)
         else:
-            print(f"未知命令: {cmd}")
-            print("输入 'help' 查看可用命令")
+            # 否则更新会话列表
+            self.refresh_conversations()
+            QApplication.beep()
     
-    def _show_help(self):
-        """显示帮助信息"""
-        help_text = """
-可用命令:
-  help                    - 显示此帮助信息
-  exit                    - 退出命令行界面
-  status                  - 查看当前状态
-  register <用户> <密码>   - 用户注册
-  login <用户> <密码> <OTP> - 用户登录
-  logout                  - 用户登出
-  send <对话ID> <消息>     - 发送消息
-  conversations           - 查看对话列表
-  messages <对话ID>        - 查看对话消息
-"""
-        print(help_text)
+    def on_message_sent(self, data: dict):
+        """消息发送成功"""
+        text = data.get('text', '')
+        self.add_message_to_display("我", text, is_from_me=True)
+        self.message_input.clear()
+    
+    def on_message_failed(self, data: dict):
+        """消息发送失败"""
+        error = data.get('error', 'Unknown error')
+        QMessageBox.warning(self, "发送失败", f"消息发送失败: {error}")
+    
+    def on_friend_request(self, data: dict):
+        """收到好友请求"""
+        from_user = data.get('from_user', 'Unknown')
+        reply = QMessageBox.question(
+            self, "好友请求",
+            f"{from_user} 想添加你为好友，是否接受？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            # 这里需要实现接受好友请求的逻辑
+            self.accept_friend_request(from_user)
+    
+    # ========== 业务操作 ==========
+    
+    def do_login(self, username: str, password: str, otp: str):
+        """执行登录"""
+        result = self.ui_controller.ui_login(username, password, otp if otp else "123456")
+        if not result.get('success'):
+            QMessageBox.warning(self, "登录失败", result.get('error', '登录失败'))
+    
+    def do_logout(self):
+        """登出"""
+        self.ui_controller.ui_logout()
+    
+    def send_message(self):
+        """发送消息"""
+        if not self.current_conversation:
+            QMessageBox.warning(self, "提示", "请先选择一个会话")
+            return
+        
+        text = self.message_input.toPlainText().strip()
+        if not text:
+            return
+        
+        ttl = self.ttl_spin.value()
+        result = self.ui_controller.ui_send_message(self.current_conversation, text, ttl)
+        if not result.get('success'):
+            QMessageBox.warning(self, "发送失败", result.get('error', '发送失败'))
+    
+    def do_add_friend(self, username: str):
+        """添加好友"""
+        result = self.ui_controller.ui_search_and_add_friend(username)
+        if result.get('success'):
+            QMessageBox.information(self, "成功", f"好友请求已发送给 {username}")
+        else:
+            QMessageBox.warning(self, "失败", result.get('error', '添加失败'))
+    
+    def accept_friend_request(self, from_user: str):
+        """接受好友请求"""
+        # 需要实现接受好友请求的 API
+        pass
+    
+    # ========== 刷新数据 ==========
+    
+    def refresh_all(self):
+        """刷新所有数据"""
+        self.refresh_conversations()
+        self.refresh_friends()
+    
+    def refresh_conversations(self):
+        """刷新会话列表"""
+        self.conversations_list.clear()
+        conversations = self.ui_controller.ui_get_conversations()
+        
+        for conv in conversations:
+            peer = conv.get('peer_user_id', 'Unknown')
+            last_msg = conv.get('last_message', '')[:30]
+            unread = conv.get('unread_count', 0)
+            
+            item_text = f"{peer}"
+            if unread > 0:
+                item_text = f"🔴 {peer} ({unread})"
+            if last_msg:
+                item_text += f"\n  {last_msg}"
+            
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.UserRole, conv.get('conversation_id'))
+            self.conversations_list.addItem(item)
+            
+            # 更新映射
+            self.friend_to_conv_id[peer] = conv.get('conversation_id')
+    
+    def refresh_friends(self):
+        """刷新好友列表"""
+        self.friends_list.clear()
+        # 需要实现获取好友列表的 API
+        # 暂时从会话中获取
+        conversations = self.ui_controller.ui_get_conversations()
+        for conv in conversations:
+            peer = conv.get('peer_user_id', 'Unknown')
+            item = QListWidgetItem(peer)
+            item.setData(Qt.UserRole, peer)
+            self.friends_list.addItem(item)
+    
+    # ========== 会话选择 ==========
+    
+    def on_conversation_selected(self, item: QListWidgetItem):
+        """选择会话"""
+        conv_id = item.data(Qt.UserRole)
+        if conv_id:
+            self.current_conversation = conv_id
+            self.load_messages(conv_id)
+            
+            # 获取对方用户名
+            for peer, cid in self.friend_to_conv_id.items():
+                if cid == conv_id:
+                    self.chat_title.setText(f"正在与 {peer} 聊天")
+                    break
+    
+    def on_friend_selected(self, item: QListWidgetItem):
+        """选择好友"""
+        friend_name = item.data(Qt.UserRole)
+        if friend_name:
+            conv_id = self.friend_to_conv_id.get(friend_name)
+            if conv_id:
+                self.current_conversation = conv_id
+                self.load_messages(conv_id)
+                self.chat_title.setText(f"正在与 {friend_name} 聊天")
+            else:
+                # 没有会话，创建新会话
+                self.current_conversation = friend_name
+                self.chat_title.setText(f"正在与 {friend_name} 聊天（新会话）")
+                self.messages_text.clear()
+    
+    def load_messages(self, conversation_id: str):
+        """加载消息历史"""
+        self.messages_text.clear()
+        messages = self.ui_controller.ui_get_messages(conversation_id, limit=50)
+        
+        for msg in reversed(messages):
+            direction = "→" if msg.get('direction') == 'outgoing' else "←"
+            text = msg.get('text', '')
+            timestamp = msg.get('created_at', msg.get('timestamp', 0))
+            if timestamp:
+                time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
+            else:
+                time_str = "Unknown"
+            
+            self.add_message_to_display(
+                "我" if direction == "→" else msg.get('sender_id', '对方'),
+                text,
+                direction == "→",
+                time_str
+            )
+    
+    def add_message_to_display(self, sender: str, text: str, is_from_me: bool = False, time_str: str = None):
+        """添加消息到显示区域"""
+        if time_str is None:
+            time_str = datetime.now().strftime("%H:%M")
+        
+        if is_from_me:
+            html = f"""
+            <div style="text-align: right; margin: 5px;">
+                <span style="background-color: #27ae60; color: white; padding: 8px; border-radius: 10px; display: inline-block; max-width: 70%;">
+                    <b>{sender}</b><br>{text}
+                </span>
+                <div style="font-size: 10px; color: gray;">{time_str}</div>
+            </div>
+            """
+        else:
+            html = f"""
+            <div style="text-align: left; margin: 5px;">
+                <span style="background-color: #34495e; color: white; padding: 8px; border-radius: 10px; display: inline-block; max-width: 70%;">
+                    <b>{sender}</b><br>{text}
+                </span>
+                <div style="font-size: 10px; color: gray;">{time_str}</div>
+            </div>
+            """
+        
+        self.messages_text.insertHtml(html)
+        # 滚动到底部
+        scrollbar = self.messages_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+    
+    def show_add_friend_dialog(self):
+        """显示添加好友对话框"""
+        self.add_friend_dialog.show()
+    
+    # ========== 消息轮询 ==========
+    
+    def start_polling(self):
+        """启动消息轮询"""
+        self.polling_running = True
+        self.polling_thread = threading.Thread(target=self.poll_messages, daemon=True)
+        self.polling_thread.start()
+    
+    def stop_polling(self):
+        """停止消息轮询"""
+        self.polling_running = False
+        if self.polling_thread:
+            self.polling_thread.join(timeout=2)
+    
+    def poll_messages(self):
+        """轮询新消息"""
+        import time
+        while self.polling_running:
+            try:
+                # 刷新会话列表
+                self.refresh_conversations()
+                time.sleep(2)
+            except:
+                pass
 
 
-class UIController:
-    """UI控制器 - 为图形界面提供接口"""
+class LoginDialog(QDialog):
+    """登录对话框"""
     
-    def __init__(self, client: InstantMessagingClient):
-        self.client = client
+    login_signal = pyqtSignal(str, str, str)
     
-    # ========== 认证相关接口 ==========
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("登录 / 注册")
+        self.setModal(True)
+        self.setup_ui()
     
-    def ui_register(self, username: str, password: str) -> Dict:
-        """UI注册接口"""
-        return self.client.register(username, password)
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # 标签页
+        self.tab_widget = QTabWidget()
+        
+        # 登录页
+        login_widget = QWidget()
+        login_layout = QFormLayout(login_widget)
+        self.login_username = QLineEdit()
+        self.login_password = QLineEdit()
+        self.login_password.setEchoMode(QLineEdit.Password)
+        self.login_otp = QLineEdit()
+        self.login_otp.setPlaceholderText("可选")
+        login_layout.addRow("用户名:", self.login_username)
+        login_layout.addRow("密码:", self.login_password)
+        login_layout.addRow("OTP:", self.login_otp)
+        
+        self.login_btn = QPushButton("登录")
+        self.login_btn.clicked.connect(self.on_login)
+        login_layout.addRow(self.login_btn)
+        
+        # 注册页
+        register_widget = QWidget()
+        register_layout = QFormLayout(register_widget)
+        self.register_username = QLineEdit()
+        self.register_password = QLineEdit()
+        self.register_password.setEchoMode(QLineEdit.Password)
+        register_layout.addRow("用户名:", self.register_username)
+        register_layout.addRow("密码:", self.register_password)
+        
+        self.register_btn = QPushButton("注册")
+        self.register_btn.clicked.connect(self.on_register)
+        register_layout.addRow(self.register_btn)
+        
+        self.tab_widget.addTab(login_widget, "登录")
+        self.tab_widget.addTab(register_widget, "注册")
+        layout.addWidget(self.tab_widget)
     
-    def ui_login(self, username: str, password: str, otp: str) -> Dict:
-        """UI登录接口"""
-        return self.client.login(username, password, otp)
+    def on_login(self):
+        username = self.login_username.text().strip()
+        password = self.login_password.text().strip()
+        otp = self.login_otp.text().strip()
+        
+        if not username or not password:
+            QMessageBox.warning(self, "错误", "请输入用户名和密码")
+            return
+        
+        self.login_signal.emit(username, password, otp)
+        self.close()
     
-    def ui_logout(self) -> Dict:
-        """UI登出接口"""
-        self.client.logout()
-        return {"success": True, "message": "登出成功"}
+    def on_register(self):
+        username = self.register_username.text().strip()
+        password = self.register_password.text().strip()
+        
+        if not username or not password:
+            QMessageBox.warning(self, "错误", "请输入用户名和密码")
+            return
+        
+        # 调用注册
+        from main import InstantMessagingClient
+        client = InstantMessagingClient()
+        result = client.register(username, password)
+        
+        if result.get('success'):
+            QMessageBox.information(self, "成功", "注册成功！请登录")
+            self.tab_widget.setCurrentIndex(0)
+            self.login_username.setText(username)
+        else:
+            QMessageBox.warning(self, "失败", result.get('error', '注册失败'))
+
+
+class AddFriendDialog(QDialog):
+    """添加好友对话框"""
     
-    # ========== 聊天相关接口 ==========
+    add_friend_signal = pyqtSignal(str)
     
-    def ui_send_message(self, conversation_id: str, text: str, ttl: int = 30) -> Dict:
-        """UI发送消息接口"""
-        return self.client.send_message(conversation_id, text, ttl)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("添加好友")
+        self.setModal(True)
+        self.setup_ui()
     
-    def ui_get_conversations(self) -> List[Dict]:
-        """UI获取对话列表接口"""
-        return self.client.list_conversations()
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("输入好友用户名")
+        layout.addWidget(self.username_input)
+        
+        btn_layout = QHBoxLayout()
+        self.add_btn = QPushButton("添加")
+        self.cancel_btn = QPushButton("取消")
+        self.add_btn.clicked.connect(self.on_add)
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self.add_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
     
-    def ui_get_messages(self, conversation_id: str, limit: int = 50) -> List[Dict]:
-        """UI获取消息接口"""
-        return self.client.list_messages(conversation_id, limit)
-    
-    def ui_open_conversation(self, conversation_id: str) -> Dict:
-        """UI打开对话接口"""
-        self.client.open_conversation(conversation_id)
-        return {"success": True, "conversation_id": conversation_id}
-    
-    def ui_get_user_status(self) -> Dict:
-        """UI获取用户状态接口"""
-        return self.client.get_user_status()
-    
-    # ========== 事件注册接口 ==========
-    
-    def ui_register_callback(self, event_name: str, callback: Callable) -> Dict:
-        """UI注册回调接口"""
-        self.client.register_ui_callback(event_name, callback)
-        return {"success": True, "event_name": event_name}
-    
-    def ui_unregister_callback(self, event_name: str) -> Dict:
-        """UI注销回调接口"""
-        self.client.unregister_ui_callback(event_name)
-        return {"success": True, "event_name": event_name}
+    def on_add(self):
+        username = self.username_input.text().strip()
+        if username:
+            self.add_friend_signal.emit(username)
+            self.accept()
+        else:
+            QMessageBox.warning(self, "错误", "请输入用户名")
 
 
 def main():
-    """客户端主函数"""
-    print("=== 端到端加密即时通讯客户端 ===")
-    print("正在初始化客户端...")
+    """启动图形界面"""
+    app = QApplication(sys.argv)
     
-    # 创建客户端实例
-    client = InstantMessagingClient()
+    # 设置应用样式
+    app.setStyle('Fusion')
     
-    print("客户端初始化完成!")
-    print("\n可用功能:")
-    print("- 用户注册/登录")
-    print("- 端到端加密消息传输")
-    print("- 好友申请/管理")
-    print("- 历史消息同步")
-    print("- 实时消息推送")
+    # 创建主窗口
+    window = ChatGUI(server_url="http://localhost:80")
+    window.show()
     
-    # 创建命令行界面和UI控制器
-    cli = CommandLineInterface(client)
-    ui_controller = UIController(client)
-    
-    print("\n选择运行模式:")
-    print("1. 命令行界面 (CLI)")
-    print("2. UI接口模式 (等待外部调用)")
-    
-    try:
-        choice = input("请选择模式 (1/2): ").strip()
-        
-        if choice == "1":
-            # 启动命令行界面
-            cli.start()
-        elif choice == "2":
-            # UI接口模式 - 保持程序运行，等待外部调用
-            print("\n=== UI接口模式已启动 ===")
-            print("客户端已就绪，等待UI界面集成...")
-            print("\nUI控制器实例已创建，可通过以下方式使用:")
-            print("- ui_controller.ui_register(username, password)")
-            print("- ui_controller.ui_login(username, password, otp)")
-            print("- ui_controller.ui_send_message(conversation_id, text)")
-            print("- ui_controller.ui_get_conversations()")
-            print("- ui_controller.ui_get_messages(conversation_id)")
-            print("\n按 Ctrl+C 退出程序")
-            
-            # 保持程序运行
-            while True:
-                try:
-                    # 这里可以添加心跳检测或其他后台任务
-                    import time
-                    time.sleep(10)
-                except KeyboardInterrupt:
-                    print("\n\n客户端已退出")
-                    break
-        else:
-            print("无效选择，退出程序")
-            
-    except KeyboardInterrupt:
-        print("\n\n客户端已退出")
-    except Exception as e:
-        print(f"客户端运行错误: {e}")
-
-
-# ========== 示例使用代码 ==========
-
-def demo_usage():
-    """演示如何使用客户端"""
-    client = InstantMessagingClient()
-    
-    # 注册UI回调示例
-    def on_message_received(data):
-        print(f"UI回调: 收到新消息: {data}")
-    
-    def on_login_success(data):
-        print(f"UI回调: 登录成功: {data}")
-    
-    # 注册回调
-    client.register_ui_callback("chat.message_received", on_message_received)
-    client.register_ui_callback("auth.login_success", on_login_success)
-    
-    print("演示完成!")
+    sys.exit(app.exec_())
 
 
 if __name__ == "__main__":
