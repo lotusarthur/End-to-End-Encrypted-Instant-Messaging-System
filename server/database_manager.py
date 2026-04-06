@@ -34,6 +34,15 @@ class DatabaseManager:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (user.username, user.password_hash, user.identity_public_key, user.otp_secret, 
                   user.is_online, user.last_seen, int(time.time())))
+            
+            # 如果提供了公钥，同时在user_public_keys表中创建记录
+            if user.identity_public_key:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO user_public_keys 
+                    (username, identity_public_key, prekey_bundle, updated_at)
+                    VALUES (?, ?, ?, ?)
+                ''', (user.username, user.identity_public_key, None, int(time.time())))
+            
             conn.commit()
             conn.close()
             return True

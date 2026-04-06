@@ -100,6 +100,7 @@ class MessagingServer:
         # 用户相关
         self.app.router.add_get('/api/v1/users/me', self.get_my_info)
         self.app.router.add_get('/api/v1/users/{username}/public-key', self.get_public_key)
+        self.app.router.add_put('/api/v1/users/me/public-key', self.update_my_public_key)
         
         # 好友相关
         self.app.router.add_post('/api/v1/friend-requests', self.send_friend_request)
@@ -184,6 +185,10 @@ class MessagingServer:
             )
             
             if self.db.add_user(user):
+                # 如果提供了公钥，同时保存到user_public_keys表
+                if identity_public_key:
+                    self.db.save_user_public_key(username, identity_public_key, None)
+                
                 return web.json_response({
                     'user_id': username,
                     'message': '注册成功'
@@ -276,6 +281,38 @@ class MessagingServer:
         return web.json_response({
             'identity_public_key': target_user.identity_public_key
         })
+    
+    async def update_my_public_key(self, request: web.Request) -> web.Response:
+        """更新当前用户的公钥（需要登录状态）"""
+        # 验证用户登录状态
+        user = await self._get_user_from_token(request)
+        if not user:
+            return web.json_response({'error': '未授权，请先登录'}, status=401)
+        
+        try:
+            data = await request.json()
+            identity_public_key = data.get('identity_public_key')
+            prekey_bundle = data.get('prekey_bundle')
+            
+            if not identity_public_key:
+                return web.json_response({'error': '身份公钥不能为空'}, status=400)
+            
+            # 更新用户公钥
+            if self.db.save_user_public_key(user.username, identity_public_key, prekey_bundle):
+                logger.info(f"用户 {user.username} 更新了公钥")
+                return web.json_response({
+                    'message': '公钥更新成功',
+                    'username': user.username,
+                    'updated_at': int(time.time())
+                })
+            else:
+                return web.json_response({'error': '公钥更新失败'}, status=500)
+                
+        except json.JSONDecodeError:
+            return web.json_response({'error': '无效的JSON格式'}, status=400)
+        except Exception as e:
+            logger.error(f"更新公钥失败: {e}")
+            return web.json_response({'error': '服务器内部错误'}, status=500)
     
     async def send_friend_request(self, request: web.Request) -> web.Response:
         """发送好友请求"""
