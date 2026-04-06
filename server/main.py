@@ -84,8 +84,11 @@ class MessagingServer:
         self.host = host
         self.port = port
         # 初始化数据库表结构
-        DatabaseSchema.init_database()
-        self.db = DatabaseManager()
+        from pathlib import Path
+        # 获取server目录下的messaging.db路径
+        db_path = str(Path(__file__).parent / "messaging.db")
+        DatabaseSchema.init_database(db_path)
+        self.db = DatabaseManager(db_path)
         self.ws_manager = WebSocketManager()
         self.app = web.Application()
         self._setup_routes()

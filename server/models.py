@@ -78,7 +78,13 @@ class DatabaseSchema:
     """数据库表结构定义"""
     
     @staticmethod
-    def init_database(db_path: str = "messaging.db"):
+    def init_database(db_path: str = None):
+        import os
+        from pathlib import Path
+        if db_path is None:
+            # 获取项目根目录下的server/messaging.db路径
+            project_root = Path(__file__).parent  # server目录
+            db_path = str(project_root / "messaging.db")
         """初始化数据库表结构"""
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()

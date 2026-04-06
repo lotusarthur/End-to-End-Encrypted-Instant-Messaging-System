@@ -12,8 +12,15 @@ from models import User, FriendRelationship, Message, UserPublicKey
 class DatabaseManager:
     """数据库管理类 - 实现完整的CRUD操作"""
     
-    def __init__(self, db_path: str = "messaging.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            import os
+            from pathlib import Path
+            # 获取项目根目录下的server/messaging.db路径
+            project_root = Path(__file__).parent  # server目录
+            self.db_path = str(project_root / "messaging.db")
+        else:
+            self.db_path = db_path
     
     def _get_connection(self) -> sqlite3.Connection:
         """获取数据库连接"""
