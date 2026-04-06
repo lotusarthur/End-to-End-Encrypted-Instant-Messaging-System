@@ -492,14 +492,26 @@ def main():
             # 启动图形界面
             print("\n正在启动图形界面...")
             try:
-                # 导入并启动 PyQt 图形界面
-                from ui.gui import ChatGUI
-                import sys
                 from PyQt5.QtWidgets import QApplication
+                from ui.gui import LoginDialog, ChatGUI
+                import sys
                 
                 app = QApplication(sys.argv)
-                window = ChatGUI(server_url=client.server_url)
-                window.show()
+                
+                # 创建登录对话框
+                login_dialog = LoginDialog()
+                main_window = None
+                
+                def on_login_success(username):
+                    nonlocal main_window
+                    # 登录成功后创建主窗口
+                    main_window = ChatGUI(server_url=client.server_url)
+                    main_window.show()
+                    login_dialog.close()
+                
+                login_dialog.login_success_signal.connect(on_login_success)
+                login_dialog.show()
+                
                 sys.exit(app.exec_())
             except ImportError as e:
                 print(f"无法启动图形界面: {e}")
