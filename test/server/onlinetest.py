@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 
 # 服务器配置
-BASE_URL = "http://localhost"
+BASE_URL = "https://ungladly-cremasterial-spring.ngrok-free.dev"
 
 def test_register():
     """测试用户注册接口"""
@@ -93,6 +93,41 @@ def test_websocket_connection(token):
     print("注意：WebSocket测试需要异步环境，这里仅显示连接URL")
     print(f"WebSocket URL: ws://localhost/api/v1/ws?token={token}")
 
+def test_duplicate_user_registration():
+    """测试重复用户注册"""
+    print("\n=== 测试重复用户注册 ===")
+    
+    # 测试数据
+    user_data = {"username": "duplicate_user", "password": "testpass123"}
+    
+    # 第一次注册
+    response1 = requests.post(f"{BASE_URL}/api/v1/users", json=user_data)
+    print(f"第一次注册 {user_data['username']}: {response1.status_code} - {response1.text}")
+    
+    # 等待一小段时间
+    time.sleep(0.5)
+    
+    # 第二次注册相同用户名
+    response2 = requests.post(f"{BASE_URL}/api/v1/users", json=user_data)
+    print(f"第二次注册 {user_data['username']}: {response2.status_code} - {response2.text}")
+    
+    # 验证测试结果
+    if response1.status_code == 201:
+        print("✓ First registration successful")
+    else:
+        print("✗ First registration failed")
+    
+    if response2.status_code == 400:
+        print("✓ Second registration correctly returned 400 error")
+        if "User already exists" in response2.text:
+            print("✓ Error message correct: 'User already exists'")
+        else:
+            print("✗ Error message incorrect")
+    else:
+        print(f"✗ Second registration returned wrong status code: {response2.status_code}")
+    
+    return response1.status_code == 201 and response2.status_code == 400
+
 def run_all_tests():
     """运行所有测试"""
     print("开始API接口测试...")
@@ -102,21 +137,31 @@ def run_all_tests():
     # 1. 测试注册
     test_register()
     
-    # 2. 测试登录
+    # 2. 测试重复用户注册
+    duplicate_test_result = test_duplicate_user_registration()
+    
+    # 3. 测试登录
     token = test_login()
     
     if token:
-        # 3. 测试获取用户信息
+        # 4. 测试获取用户信息
         test_get_user_info(token)
         
-        # 4. 测试好友请求
+        # 5. 测试好友请求
         test_send_friend_request(token)
         test_get_friend_requests(token)
         
-        # 5. 测试WebSocket
+        # 6. 测试WebSocket
         test_websocket_connection(token)
     
     print("\n" + "=" * 50)
+    
+    # 测试结果总结
+    if duplicate_test_result:
+        print("✓ 用户ID重复测试通过")
+    else:
+        print("✗ 用户ID重复测试失败")
+    
     print("测试完成！")
 
 if __name__ == "__main__":
