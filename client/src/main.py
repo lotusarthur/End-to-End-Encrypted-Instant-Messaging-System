@@ -489,26 +489,22 @@ def main():
             # 启动命令行界面
             cli.start()
         elif choice == "2":
-            # UI接口模式 - 保持程序运行，等待外部调用
-            print("\n=== UI接口模式已启动 ===")
-            print("客户端已就绪，等待UI界面集成...")
-            print("\nUI控制器实例已创建，可通过以下方式使用:")
-            print("- ui_controller.ui_register(username, password)")
-            print("- ui_controller.ui_login(username, password, otp)")
-            print("- ui_controller.ui_send_message(conversation_id, text)")
-            print("- ui_controller.ui_get_conversations()")
-            print("- ui_controller.ui_get_messages(conversation_id)")
-            print("\n按 Ctrl+C 退出程序")
-            
-            # 保持程序运行
-            while True:
-                try:
-                    # 这里可以添加心跳检测或其他后台任务
-                    import time
-                    time.sleep(10)
-                except KeyboardInterrupt:
-                    print("\n\n客户端已退出")
-                    break
+            # 启动图形界面
+            print("\n正在启动图形界面...")
+            try:
+                # 导入并启动 PyQt 图形界面
+                from ui.gui import ChatGUI
+                import sys
+                from PyQt5.QtWidgets import QApplication
+                
+                app = QApplication(sys.argv)
+                window = ChatGUI(server_url=client.server_url)
+                window.show()
+                sys.exit(app.exec_())
+            except ImportError as e:
+                print(f"无法启动图形界面: {e}")
+            except Exception as e:
+                print(f"图形界面启动失败: {e}")
         else:
             print("无效选择，退出程序")
             
