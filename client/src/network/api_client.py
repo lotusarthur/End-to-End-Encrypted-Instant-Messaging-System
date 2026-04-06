@@ -1,26 +1,35 @@
+"""API client for HTTP operations."""
 import requests
 import base64
 from typing import Optional, Dict, List
-try:
-    from shared.constants import API_BASE_PATH
-except ImportError:
-    from ...shared.constants import API_BASE_PATH
+
+import os
+import sys
+# 添加项目根目录到Python路径
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+from shared.constants import API_BASE_PATH
+
 
 class NetworkClient:
+    """HTTP client for messaging API."""
+    
     def __init__(self, server_url: str):
+        """Initialize API client."""
         self.server_url = server_url
         self.token = None
 
-    # 认证相关方法
+    # Authentication methods
     def register(self, username: str, password: str, otp_secret: str = None) -> dict:
-        """注册用户，返回用户信息"""
+        """Register a new user."""
         payload = {"username": username, "password": password}
         if otp_secret is not None:
             payload["otp_secret"] = otp_secret
         return self._make_request("POST", "/users", payload)
 
     def login(self, username: str, password: str, otp_code: str = None) -> str:
-        """登录，返回 JWT token"""
+        """Login and get JWT token."""
         payload = {"username": username, "password": password}
         if otp_code is not None:
             payload["otp_code"] = otp_code
@@ -31,12 +40,12 @@ class NetworkClient:
         return self.token
 
     def logout(self) -> None:
-        """登出"""
+        """Logout."""
         self._make_request("POST", "/auth/logout")
         self.token = None
 
     def refresh_token(self) -> bool:
-        """刷新 token"""
+        """Refresh JWT token."""
         if not self.token:
             return False
         try:
@@ -49,9 +58,9 @@ class NetworkClient:
             return False
         return False
 
-    # 用户与公钥相关方法
+    # User and public key methods
     def get_public_key(self, username: str) -> bytes:
-        """获取用户公钥"""
+        """Get user public key."""
         result = self._make_request("GET", f"/users/{username}/public-key")
         key_b64 = result.get("identity_public_key")
         if not key_b64:
@@ -59,48 +68,48 @@ class NetworkClient:
         return base64.b64decode(key_b64)
 
     def get_my_info(self) -> dict:
-        """获取当前用户信息"""
+        """Get current user info."""
         return self._make_request("GET", "/users/me")
 
-    # 好友管理相关方法
+    # Friend management methods
     def send_friend_request(self, to_user: str) -> str:
-        """发送好友请求"""
+        """Send friend request."""
         result = self._make_request("POST", "/friend-requests", {"to_user": to_user})
         return result["request_id"]
 
     def accept_friend_request(self, request_id: str) -> None:
-        """接受好友请求"""
+        """Accept friend request."""
         self._make_request("PUT", f"/friend-requests/{request_id}", {"status": "accepted"})
 
     def decline_friend_request(self, request_id: str) -> None:
-        """拒绝好友请求"""
+        """Decline friend request."""
         self._make_request("PUT", f"/friend-requests/{request_id}", {"status": "declined"})
 
     def cancel_friend_request(self, request_id: str) -> None:
-        """取消好友请求"""
+        """Cancel friend request."""
         self._make_request("DELETE", f"/friend-requests/{request_id}")
 
     def get_friend_requests(self, request_type: str = "received") -> list:
-        """获取好友请求列表"""
+        """Get friend requests."""
         result = self._make_request("GET", f"/friend-requests?type={request_type}")
         return result.get("requests", [])
 
     def get_friends(self) -> list:
-        """获取好友列表"""
+        """Get friends list."""
         result = self._make_request("GET", "/friends")
         return result.get("friends", [])
 
     def remove_friend(self, username: str) -> None:
-        """删除好友"""
+        """Remove a friend."""
         self._make_request("DELETE", f"/friends/{username}")
 
     def block_user(self, username: str) -> None:
-        """屏蔽用户"""
+        """Block a user."""
         self._make_request("POST", f"/friends/{username}/block")
 
-    # 消息相关方法
+    # Message methods
     def send_message(self, to_user: str, ciphertext: bytes, ttl: int) -> str:
-        """发送消息"""
+        """Send a message."""
         result = self._make_request(
             "POST",
             "/messages",
@@ -113,13 +122,13 @@ class NetworkClient:
         return result["message_id"]
 
     def fetch_offline_messages(self) -> list:
-        """获取离线消息"""
+        """Fetch offline messages."""
         result = self._make_request("GET", "/messages/offline")
         return result.get("messages", [])
 
-    # 辅助方法
+    # Helper methods
     def _make_request(self, method: str, endpoint: str, data: dict = None) -> dict:
-        """发送 HTTP 请求"""
+        """Make HTTP request."""
         url = f"{self.server_url.rstrip('/')}{API_BASE_PATH}{endpoint}"
         headers = self._get_auth_headers()
         resp = requests.request(method=method, url=url, json=data, headers=headers, timeout=20)
@@ -130,7 +139,7 @@ class NetworkClient:
         return resp.json()
 
     def _get_auth_headers(self) -> dict:
-        """获取认证头"""
+        """Get authentication headers."""
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
