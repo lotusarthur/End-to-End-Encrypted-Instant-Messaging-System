@@ -93,21 +93,60 @@ class MessagingServer:
     
     def _setup_middleware(self):
         """设置中间件"""
-        # 添加内容安全策略中间件
-        async def csp_middleware(request, handler):
-            response = await handler(request)
-            
-            # 添加CSP头
-            response.headers['Content-Security-Policy'] = security.get_csp_header()
-            
-            # 添加其他安全头
-            response.headers['X-Content-Type-Options'] = 'nosniff'
-            response.headers['X-Frame-Options'] = 'DENY'
-            response.headers['X-XSS-Protection'] = '1; mode=block'
-            
-            return response
+        # 添加全局错误处理中间件
+        async def error_handling_middleware(app, handler):
+            async def middleware_handler(request):
+                try:
+                    response = await handler(request)
+                    return response
+                except Exception as e:
+                    import traceback
+                    logger.error(f"请求处理错误: {e}")
+                    logger.error(f"请求路径: {request.path}")
+                    logger.error(f"请求方法: {request.method}")
+                    logger.error(f"详细错误信息: {traceback.format_exc()}")
+                    logger.error(f"错误类型: {type(e).__name__}")
+                    from aiohttp import web
+                    return web.json_response({
+                        'error': 'Internal server error', 
+                        'details': str(e), 
+                        'error_type': type(e).__name__,
+                        'path': request.path,
+                        'method': request.method
+                    }, status=500)
+            return middleware_handler
         
-        # 注册中间件
+        # 添加内容安全策略中间件
+        async def csp_middleware(app, handler):
+            async def middleware_handler(request):
+                try:
+                    response = await handler(request)
+                    
+                    # 添加CSP头
+                    response.headers['Content-Security-Policy'] = security.get_csp_header()
+                    
+                    # 添加其他安全头
+                    response.headers['X-Content-Type-Options'] = 'nosniff'
+                    response.headers['X-Frame-Options'] = 'DENY'
+                    response.headers['X-XSS-Protection'] = '1; mode=block'
+                    
+                    return response
+                except Exception as e:
+                    import traceback
+                    logger.error(f"CSP中间件错误: {e}")
+                    logger.error(f"详细错误信息: {traceback.format_exc()}")
+                    logger.error(f"错误类型: {type(e).__name__}")
+                    from aiohttp import web
+                    return web.json_response({
+                        'error': 'Middleware error', 
+                        'details': str(e), 
+                        'error_type': type(e).__name__,
+                        'path': request.path
+                    }, status=500)
+            return middleware_handler
+        
+        # 注册中间件 - 注意顺序很重要
+        self.app.middlewares.append(error_handling_middleware)
         self.app.middlewares.append(csp_middleware)
     
     def _setup_routes(self):
@@ -163,11 +202,16 @@ class MessagingServer:
             raw_body = await request.text()
             logger.info(f"接收到的原始数据: {raw_body}")
             '''
-            # 尝试解析JSON
             try:
                 data = await request.json()
             except json.JSONDecodeError as e:
+                # 调试功能：查看原始请求体
+                raw_body = await request.text()
                 logger.error(f"JSON解析失败: {e}")
+                logger.error(f"原始请求体: {raw_body}")
+                logger.error(f"请求头: {dict(request.headers)}")
+                logger.error(f"请求方法: {request.method}")
+                logger.error(f"请求路径: {request.path}")
                 # 尝试修复非标准JSON格式（缺少双引号的属性名和值）
                 try:
                     # 修复属性名和属性值的双引号
@@ -180,6 +224,7 @@ class MessagingServer:
                     data = json.loads(fixed_body)
                 except Exception as fix_error:
                     logger.error(f"JSON修复失败: {fix_error}")
+                    logger.error(f"修复错误详情: {str(fix_error)}")
                     return web.json_response({'error': 'Invalid JSON format. Please use standard JSON format: {"username":"testuser","password":"testpass"}'}, status=400)
             
             username = data.get('username')
@@ -225,13 +270,30 @@ class MessagingServer:
                 return web.json_response({'error': 'Registration failed'}, status=500)
                 
         except Exception as e:
+            import traceback
             logger.error(f"注册失败: {e}")
-            return web.json_response({'error': 'Internal server error'}, status=500)
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            return web.json_response({'error': 'Internal server error', 'details': str(e), 'error_type': type(e).__name__}, status=500)
     
     async def login(self, request: web.Request) -> web.Response:
         """用户登录"""
         try:
-            data = await request.json()
+            # 捕获并记录原始请求数据
+            raw_body = await request.text()
+            logger.debug(f"登录请求原始数据: {raw_body}")
+            
+            # 尝试解析JSON
+            try:
+                data = json.loads(raw_body)
+            except json.JSONDecodeError as json_err:
+                logger.error(f"登录JSON解析失败: {json_err}")
+                logger.error(f"原始请求体: {raw_body}")
+                logger.error(f"请求头: {dict(request.headers)}")
+                logger.error(f"请求方法: {request.method}")
+                logger.error(f"请求路径: {request.path}")
+                return web.json_response({'error': '无效的JSON格式'}, status=400)
+            
             username = data.get('username')
             password = data.get('password')
             otp_code = data.get('otp_code')
@@ -260,8 +322,17 @@ class MessagingServer:
             })
                 
         except Exception as e:
+            import traceback
             logger.error(f"登录失败: {e}")
-            return web.json_response({'error': 'Internal server error'}, status=500)
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            global last_error_info
+            last_error_info = {
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'traceback': traceback.format_exc()
+            }
+            return web.json_response({'error': 'Internal server error', 'details': str(e), 'error_type': type(e).__name__}, status=500)
     
     async def logout(self, request: web.Request) -> web.Response:
         """用户登出"""
