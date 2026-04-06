@@ -1,612 +1,314 @@
 端到端加密即时通讯系统 - 完整测试格式与实现思路
-
 ==================================================
-
-
 
 创建时间: 2026-04-06
-
 文件位置: g:\accdemic_data\2026_spring\secur\project\test\3\End-to-End-Encrypted-Instant-Messaging-System-master\End-to-End-Encrypted-Instant-Messaging-System-master\server\complete_test_format_guide.txt
 
-
-
 一、核心测试场景与传递格式（完整版）
-
 ==================================
 
-
-
 1. 用户注册与数据库管理
-
 -----------------------
-
 传递格式:
-
 - 用户对象格式:
-
   User(username, password_hash, identity_public_key, otp_secret, is_online, last_seen)
-
 - 数据库初始化: DatabaseSchema.init_database(db_path)
-
 - 数据库管理器: DatabaseManager(db_path)
 
-
-
 实现思路:
-
 - 使用临时数据库文件进行测试隔离
-
 - 每个测试用例前后清理数据库状态
 
-
-
 2. WebSocket连接管理格式
-
 ----------------------
-
 传递格式:
-
-- MockWebSocket类格式（测试方法）:
-
+- MockWebSocket类格式:
   class MockWebSocket:
-
       def __init__(self, user_id: str)
-
       async def send(self, message: str)
-
       async def close(self)
-
       
-
-- DummyWsManager类格式（测试方法）:
-
+- DummyWsManager类格式:
   class DummyWsManager:
-
       def is_user_online(self, username: str) -> bool
-
       async def send_to_user(self, username: str, message: dict[str, Any]) -> bool
 
-
-
-
+实现思路:
+- 模拟真实WebSocket连接行为
+- 记录所有发送的消息用于验证
 
 3. 消息传输格式（完整版）
-
 ----------------------
-
 传递格式:
-
-- 基础消息格式 (Message对象，请不要使用它！这是过时的！):
-
+- 基础消息格式 (过时错误方法！勿用):
   Message(message_id, from_user, to_user, ciphertext, timestamp, ttl_seconds, status, signature)
 
-
-
 - 加密网络包格式 (EncryptedNetworkPackage):
-
   EncryptedNetworkPackage(
-
       message_id, sender_id, receiver_id, ciphertext_b64, 
-
       nonce_b64, mac_tag_b64, ad_serialized, timestamp, ttl_seconds, status
-
   )
 
-
-
 - WebSocket实时消息格式:
-
   {
-
       "type": "message",
-
       "message_id": "...",
-
       "sender_id": "...", 
-
       "receiver_id": "...",
-
       "ciphertext_b64": "...",
-
       "nonce_b64": "...",
-
       "mac_tag_b64": "...",
-
       "ad_serialized": "...",
-
       "timestamp": ...,
-
       "ttl_seconds": ...,
-
       "status": "delivered"
-
   }
 
-
-
+实现思路:
+- 支持新旧两种消息格式的兼容
+- 确保加密字段的Base64编码正确性
+- 实时消息和离线消息的统一处理
 
 4. 好友关系管理格式（完整版）
-
 --------------------------
-
 传递格式:
-
 - 好友申请发送: db_manager.add_friend_request(from_user, to_user) -> request_id
-
 - 获取好友申请: 
-
   db_manager.get_friend_requests(username, "received")  # 收到的申请
-
   db_manager.get_friend_requests(username, "sent")     # 发送的申请
-
   
-
 - 申请状态更新: db_manager.update_friend_request_status(request_id, status)
-
   状态值: "pending", "accepted", "declined", "cancelled"
-
   
-
 - 好友列表获取: db_manager.get_friends(username)
-
 - 好友关系删除: db_manager.remove_friend(user_a, user_b)
 
-
-
 实现思路:
-
 - 确保好友关系的双向一致性
-
 - 处理重复申请和状态冲突
-
 - 验证时间戳和状态转换的正确性
 
-
-
 5. 非好友通信限制格式
-
 -------------------
-
 传递格式:
-
 - 消息发送前验证: message_manager.can_send_message(sender, receiver) -> bool
-
 - 好友关系检查: 通过FriendRelationship表验证
-
 - 错误响应格式: {"error": "not_friends", "message": "需要先成为好友才能发送消息"}
 
-
-
 实现思路:
-
 - 在消息发送前进行好友关系验证
-
 - 对非好友消息进行拦截和错误提示
-
 - 支持好友申请流程的完整性
 
-
-
 6. 消息状态管理格式
-
 -----------------
-
 传递格式:
-
 - 消息发送: message_manager.mark_message_sent(message_id, sender, receiver)
-
 - 消息投递: message_manager.mark_message_delivered(message_id)
-
 - 状态查询: db_manager.get_offline_messages(username)
-
 - 状态更新: db_manager.update_message_status(message_id, new_status)
 
-
-
 实现思路:
-
 - 维护消息的完整生命周期状态
-
 - 支持离线消息的缓存和拉取
-
 - 确保状态转换的一致性
 
-
-
 二、测试用例组织结构
-
 ==================
-
-
 
 1. 测试类基本结构
-
 ---------------
-
 ```python
-
 class TestClassName(unittest.TestCase):
-
     def setUp(self):
-
         # 初始化测试环境
-
         self.temp_dir = tempfile.TemporaryDirectory()
-
         self.db_path = str(Path(self.temp_dir.name) / "test.db")
-
         DatabaseSchema.init_database(self.db_path)
-
         self.db_manager = DatabaseManager(self.db_path)
-
         
-
     def tearDown(self):
-
         # 清理测试环境
-
         self.temp_dir.cleanup()
-
         
-
     def test_specific_functionality(self):
-
         # 具体的测试逻辑
-
         pass
-
 ```
-
-
 
 2. 异步测试支持
-
 -------------
-
 ```python
-
 async def async_test_function():
-
     # 异步测试逻辑
-
     pass
-
-
 
 def test_wrapper(self):
-
     asyncio.run(async_test_function())
-
 ```
-
-
 
 三、验证标准与断言格式
-
 ==================
 
-
-
 1. 数据库操作验证
-
 ---------------
-
 ```python
-
 # 用户注册验证
-
 self.assertTrue(db_manager.add_user(user))
-
 self.assertIsNotNone(db_manager.get_user(username))
 
-
-
 # 消息存储验证  
-
 self.assertTrue(db_manager.add_message(message))
-
 self.assertEqual(len(db_manager.get_offline_messages(username)), expected_count)
 
-
-
 # 好友关系验证
-
 self.assertEqual(len(db_manager.get_friends(username)), expected_friend_count)
-
 ```
-
-
 
 2. WebSocket消息验证
-
 ------------------
-
 ```python
-
 # 消息接收验证
-
 self.assertGreaterEqual(len(ws.messages), expected_count)
-
 self.assertEqual(ws.messages[-1]["message_id"], expected_id)
-
 self.assertEqual(ws.messages[-1]["sender_id"], expected_sender)
 
-
-
 # 消息格式验证
-
 required_fields = ['message_id', 'sender_id', 'receiver_id', 'ciphertext_b64']
-
 self.assertTrue(all(field in message for field in required_fields))
-
 ```
-
-
 
 3. 状态转换验证
-
 -------------
-
 ```python
-
 # 消息状态验证
-
 self.assertEqual(message.status, "sent")
-
 self.assertTrue(db_manager.update_message_status(message_id, "delivered"))
 
-
-
 # 好友申请状态验证
-
 self.assertEqual(request.status, "pending")
-
 self.assertTrue(db_manager.update_friend_request_status(request_id, "accepted"))
-
 ```
-
-
 
 四、错误处理与异常情况格式
-
 ======================
 
-
-
 1. 异常输入处理
-
 -------------
-
 ```python
-
 # 不存在的用户操作
-
 request_id = db_manager.add_friend_request("alice", "nonexistent")
-
 self.assertIsNone(request_id)
 
-
-
 # 重复操作处理  
-
 request_id2 = db_manager.add_friend_request("alice", "bob")
-
 self.assertIsNone(request_id2)  # 已存在pending请求
-
 ```
-
-
 
 2. 边界条件测试
-
 -------------
-
 ```python
-
 # 空好友列表
-
 self.assertEqual(len(db_manager.get_friends("new_user")), 0)
 
-
-
 # 无离线消息
-
 self.assertEqual(len(db_manager.get_offline_messages("online_user")), 0)
-
 ```
-
-
 
 五、测试数据管理格式
-
 =================
-
-
 
 1. 测试用户数据
-
 -------------
-
 ```python
-
 test_users = {
-
     "alice": {
-
         "password": "alice_password", 
-
         "public_key": "alice_public_key_123"
-
     },
-
     "bob": {
-
         "password": "bob_password",
-
         "public_key": "bob_public_key_456" 
-
     }
-
 }
-
 ```
-
-
 
 2. 测试消息数据
-
 -------------
-
 ```python
-
 test_messages = {
-
     "online": "ZW5jcnlwdGVkX29ubGluZV9tZXNzYWdlX2NvbnRlbnQ=",
-
     "offline": "ZW5jcnlwdGVkX29mZmxpbmVfbWVzc2FnZV9jb250ZW50"
-
 }
-
 ```
-
-
 
 六、性能与并发测试格式
-
 ===================
 
-
-
 1. 并发用户测试
-
 -------------
-
 ```python
-
 # 模拟多个用户同时在线
-
 online_users = {}
-
 for i in range(10):
-
     user_id = f"user_{i}"
-
     online_users[user_id] = MockWebSocket(user_id)
-
 ```
-
-
 
 2. 批量消息测试
-
 -------------
-
 ```python
-
 # 发送批量消息测试
-
 message_ids = []
-
 for i in range(100):
-
     message_id = str(uuid.uuid4())
-
     # 发送消息逻辑
-
     message_ids.append(message_id)
-
 ```
-
-
 
 七、扩展测试建议格式
-
 =================
 
-
-
 1. 安全测试扩展
-
 -------------
-
 ```python
-
 # 加密算法验证
-
 def test_encryption_implementation():
-
     # 验证加密/解密正确性
-
     pass
-
-
 
 # 认证机制测试  
-
 def test_authentication_flow():
-
     # 测试登录、token验证等
-
     pass
-
 ```
-
-
 
 2. 集成测试扩展
-
 -------------
-
 ```python
-
 # 端到端测试
-
 def test_end_to_end_communication():
-
     # 模拟完整用户交互流程
-
     pass
-
 ```
 
-
-
 八、重要注意事项
-
 ==============
 
-
-
 1. 测试隔离性
-
 - 每个测试用例使用独立的数据库文件
-
 - 避免测试间的数据污染
-
 - 确保测试的可重复性
 
-
-
 2. 时间戳一致性  
-
 - 使用整数时间戳而非datetime对象
-
 - 确保时间比较的逻辑正确性
-
 - 考虑测试执行的时间差
 
-
-
 3. 资源管理
-
 - 及时释放数据库连接
-
 - 清理临时文件和资源
-
 - 避免内存泄漏
 
-
-
 ==================================================
-
 文档结束 - 基于test/server文件夹完整分析整理
