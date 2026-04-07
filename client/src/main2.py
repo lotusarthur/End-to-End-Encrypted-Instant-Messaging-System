@@ -35,7 +35,7 @@ except ImportError:
 class ClientFacade:
     """客户端外观类，整合所有功能"""
     
-    def __init__(self, server_url: str = "https://ungladly-cremasterial-spring.ngrok-free.dev/"):
+    def __init__(self, server_url: str = "http://localhost:80"):
         """初始化客户端"""
         self.network_client = NetworkClient(server_url)
         self.ws_client = None
@@ -44,7 +44,7 @@ class ClientFacade:
         self.messages_history = []
         self.friend_requests = []
 
-    def register_user(self, username: str, password: str) -> bool:
+    def register_user(self, username: str, password: str) -> tuple:
         """用户注册"""
         try:
             # 生成OTP secret
@@ -55,10 +55,10 @@ class ClientFacade:
             
             result = self.network_client.register(username, password, otp_secret)
             print(f"注册成功: {result}")
-            return True
+            return True, otp_secret
         except Exception as e:
             print(f"注册失败: {str(e)}")
-            return False
+            return False, None
 
     def login_user(self, username: str, password: str, otp_code: str = None) -> bool:
         """用户登录"""
@@ -67,6 +67,7 @@ class ClientFacade:
             token = self.network_client.login(username, password, otp_code)
             
             self.current_user = username
+            self.token = token
             print(f"登录成功，欢迎 {username}!")
             
             # 获取好友列表
@@ -162,6 +163,10 @@ class ClientFacade:
             print(f"获取好友请求失败: {str(e)}")
             return []
 
+    def get_pending_requests(self) -> List:
+        """获取待处理的好友请求（兼容 UI 调用）"""
+        return self.get_friend_requests("received")
+    
     def refresh_friends_list(self) -> List[str]:
         try:
             self.friends_list = self.network_client.get_friends()
@@ -178,6 +183,17 @@ class ClientFacade:
             return self.friends_list
         except Exception as e:
             print(f"获取好友列表失败: {str(e)}")
+
+    def get_conversations(self) -> List:
+        """获取会话列表（从好友列表转换）"""
+        return self.friends_list
+    
+    def get_messages(self, peer_user_id: str, limit: int = 50) -> List:
+        """获取与某人的消息历史"""
+        # 从离线消息中筛选
+        messages = self.fetch_offline_messages()
+        filtered = [m for m in messages if m.get('from_user') == peer_user_id or m.get('sender_id') == peer_user_id]
+        return filtered[:limit]
 
     def send_message(self, target_user: str, message_content: str, ttl: int = DEFAULT_TTL) -> bool:
         """发送消息"""
@@ -470,4 +486,49 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        from PyQt5.QtWidgets import QApplication
+        from ui.gui import LoginDialog, ChatGUI
+        
+        app = QApplication(sys.argv)
+        app.setStyle('Fusion')
+        
+        # 存储主窗口引用（使用列表避免 nonlocal 问题）
+        main_window_ref = [None]
+        # 存储客户端引用
+        client_ref = [None]
+        
+        def on_login_success(username, password, otp):
+            # 创建客户端并登录
+            client = ClientFacade(server_url="http://localhost:80")
+            if client.login_user(username, password, otp):
+                # 保存客户端引用
+                client_ref[0] = client
+                # 创建主窗口，传入 client
+                main_window_ref[0] = ChatGUI(client)
+                main_window_ref[0].show()
+                # 关闭所有登录对话框
+                for widget in app.topLevelWidgets():
+                    if isinstance(widget, LoginDialog):
+                        widget.close()
+            else:
+                # 登录失败，显示错误
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(None, "登录失败", "用户名、密码或OTP验证码错误")
+        
+        # 显示登录对话框
+        login_dialog = LoginDialog()
+        login_dialog.login_success_signal.connect(on_login_success)
+        login_dialog.show()
+        
+        sys.exit(app.exec_())
+        
+    except ImportError as e:
+        print(f"无法启动图形界面: {e}")
+        print("请确保已安装 PyQt5: pip install PyQt5")
+    except Exception as e:
+        print(f"启动失败: {e}")
+        import traceback
+        traceback.print_exc()
+        # 如果 GUI 启动失败，回退到命令行界面
+        main()
