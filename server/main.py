@@ -329,13 +329,20 @@ class MessagingServer:
             
             # 验证OTP（如果启用）
             if user.otp_secret:
+                logger.debug(f"开始OTP验证，用户: {username}")
                 if not otp_code:
+                    logger.debug("OTP验证失败: 未提供验证码")
                     return web.json_response({'error': '需要OTP验证码'}, status=401)
+                logger.debug(f"接收到的OTP验证码: {otp_code}")
                 totp = pyotp.TOTP(user.otp_secret)
                 current_code = totp.now()
-                if not totp.verify(otp_code):
+                logger.debug(f"生成的当前OTP验证码: {current_code}")
+                # 允许前后1个时间窗口的误差，以解决时间同步问题
+                if not totp.verify(otp_code, valid_window=1):
+                    logger.debug(f"OTP验证失败: 验证码不匹配")
                     return web.json_response({'error': 'OTP验证码错误'}, status=401)
-                logger.info("OTP验证成功")
+                logger.info(f"OTP验证成功，用户: {username}")
+                logger.debug(f"OTP验证详情: 提供的验证码={otp_code}, 当前验证码={current_code}")
             
             # 创建token
             token = self._create_token(username)
