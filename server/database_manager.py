@@ -108,7 +108,7 @@ class DatabaseManager:
         except sqlite3.IntegrityError:
             return None
     
-    def get_friend_requests(self, username: str, request_type: str = "received") -> List[FriendRelationship]:
+    def get_friend_requests(self, username: str, request_type: str = "received") -> List[Dict[str, Any]]:
         """获取好友请求列表"""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -129,10 +129,17 @@ class DatabaseManager:
         
         requests = []
         for row in rows:
-            requests.append(FriendRelationship(
-                id=row[0], user_a=row[1], user_b=row[2], status=row[3],
-                created_at=row[4], accepted_at=row[5]
-            ))
+            requests.append({
+                'request_id': str(row[0]),  # 映射为request_id并转换为字符串
+                'id': row[0],  # 同时返回id字段，兼容旧代码
+                'from_user': row[1],
+                'user_a': row[1],  # 同时返回user_a字段，兼容旧代码
+                'to_user': row[2],
+                'user_b': row[2],  # 同时返回user_b字段，兼容旧代码
+                'status': row[3],
+                'created_at': row[4],
+                'accepted_at': row[5]
+            })
         return requests
     
     def update_friend_request_status(self, request_id: int, status: str) -> bool:
@@ -245,6 +252,61 @@ class DatabaseManager:
             return True
         except Exception:
             return False
+    
+    def store_message(self, message: Message) -> Message:
+        """存储消息（兼容旧接口）"""
+        self.add_message(message)
+        return message
+    
+    def store_offline_message(self, message: Message) -> bool:
+        """存储离线消息"""
+        return self.add_message(message)
+    
+    def get_friend_request(self, request_id: int) -> Optional[Dict[str, Any]]:
+        """获取好友请求详情"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # 首先尝试通过id查询
+            cursor.execute('''
+                SELECT * FROM friend_relationships 
+                WHERE id = ?
+            ''', (request_id,))
+            row = cursor.fetchone()
+            
+            # 如果没有找到，尝试通过用户关系查询
+            if not row:
+                # 尝试查找用户A或用户B为请求ID的记录
+                # 这是为了兼容客户端可能将用户ID当作请求ID的情况
+                cursor.execute('''
+                    SELECT * FROM friend_relationships 
+                    WHERE (user_a = ? OR user_b = ?) AND status = 'pending'
+                ''', (str(request_id), str(request_id)))
+                row = cursor.fetchone()
+            
+            conn.close()
+            
+            if row:
+                return {
+                    'id': row[0],
+                    'from_user': row[1],
+                    'to_user': row[2],
+                    'status': row[3],
+                    'created_at': row[4],
+                    'accepted_at': row[5]
+                }
+            return None
+        except Exception as e:
+            # 记录错误信息
+            import logging
+            logging.error(f"获取好友请求详情失败: {e}")
+            return None
+    
+    def store_session_key(self, from_user: str, to_user: str, key_data: str) -> bool:
+        """存储会话密钥（预留接口）"""
+        # 实际实现中可以存储到数据库
+        return True
     
     def get_offline_messages(self, username: str) -> List[Message]:
         """获取用户的离线消息 - 适配加密包格式"""
