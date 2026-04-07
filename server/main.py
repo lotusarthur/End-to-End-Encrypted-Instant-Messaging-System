@@ -15,9 +15,16 @@ from typing import Dict, List, Optional, Set
 
 import jwt
 import bcrypt
+import pyotp
 import websockets
 from aiohttp import web
 from dataclasses import dataclass, asdict
+
+# 导入OTP库
+import pyotp
+
+# 导入OTP库
+import pyotp
 
 # 导入统一的数据库管理器
 from database_manager import DatabaseManager
@@ -321,8 +328,14 @@ class MessagingServer:
                 return web.json_response({'error': '密码错误'}, status=401)
             
             # 验证OTP（如果启用）
-            if user.otp_secret and not otp_code:
-                return web.json_response({'error': '需要OTP验证码'}, status=401)
+            if user.otp_secret:
+                if not otp_code:
+                    return web.json_response({'error': '需要OTP验证码'}, status=401)
+                totp = pyotp.TOTP(user.otp_secret)
+                current_code = totp.now()
+                if not totp.verify(otp_code):
+                    return web.json_response({'error': 'OTP验证码错误'}, status=401)
+                logger.info("OTP验证成功")
             
             # 创建token
             token = self._create_token(username)
