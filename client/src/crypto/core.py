@@ -4,6 +4,9 @@ import base64
 import time
 from typing import Dict, Tuple, Optional
 
+# 导入OTP库
+import pyotp
+
 # 请确保通过 pip install cryptography 安装了库
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives import serialization, hashes
@@ -28,6 +31,15 @@ class IdentityManager:
         # 生成 10 字节的强随机数，并用 Base32 编码（Authenticator 的标准格式）
         random_bytes = os.urandom(10)
         return base64.b32encode(random_bytes).decode('utf-8').replace('=', '')
+    
+    @staticmethod
+    def generate_otp_code(otp_secret: str) -> str:
+        """
+        生成OTP验证码
+        使用提供的OTP密钥生成当前的6位数字验证码
+        """
+        totp = pyotp.TOTP(otp_secret)
+        return totp.now()
 
     @staticmethod
     def hash_password(password: str, salt_b64: Optional[str] = None) -> Tuple[str, str]:
