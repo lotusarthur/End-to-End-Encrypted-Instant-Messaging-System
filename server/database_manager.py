@@ -372,7 +372,9 @@ class DatabaseManager:
             conn.commit()
             conn.close()
             return True
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.error(f"保存用户公钥失败: {e}")
             return False
     
     def get_user_public_key(self, username: str) -> Optional[UserPublicKey]:

@@ -388,9 +388,22 @@ class MessagingServer:
         if not target_user:
             return web.json_response({'error': '用户不存在'}, status=404)
         
-        return web.json_response({
-            'identity_public_key': target_user.identity_public_key
-        })
+        # 首先尝试从user_public_keys表获取公钥
+        public_key_entry = self.db.get_user_public_key(username)
+        if public_key_entry and public_key_entry.identity_public_key:
+            return web.json_response({
+                'identity_public_key': public_key_entry.identity_public_key
+            })
+        
+        # 如果没有找到，从users表获取
+        if target_user.identity_public_key:
+            return web.json_response({
+                'identity_public_key': target_user.identity_public_key
+            })
+        
+        # 如果两个表都没有公钥，返回错误
+        return web.json_response({'error': '公钥不存在'}, status=404)
+
     
     async def update_my_public_key(self, request: web.Request) -> web.Response:
         """更新当前用户的公钥（需要登录状态）"""
