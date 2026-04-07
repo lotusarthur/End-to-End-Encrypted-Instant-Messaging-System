@@ -3,13 +3,10 @@ import requests
 import base64
 from typing import Optional, Dict, List
 
-import os
-import sys
-# 添加项目根目录到Python路径
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-from shared.constants import API_BASE_PATH
+try:
+    from shared.constants import API_BASE_PATH
+except ImportError:
+    from ...shared.constants import API_BASE_PATH
 
 
 class NetworkClient:
@@ -110,12 +107,32 @@ class NetworkClient:
     # Message methods
     def send_message(self, to_user: str, ciphertext: bytes, ttl: int) -> str:
         """Send a message."""
+        import uuid
+        import time
+        
+        # 生成消息ID和当前时间戳
+        message_id = str(uuid.uuid4())
+        
+        # 获取当前用户作为发送者
+        try:
+            user_info = self.get_my_info()
+            sender_id = user_info.get('username', 'unknown')
+        except:
+            # 如果无法获取用户信息，使用通用标识
+            sender_id = 'unknown'
+        
         result = self._make_request(
             "POST",
             "/messages",
             {
-                "to": to_user,
-                "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+                "message_id": message_id,
+                "sender_id": sender_id,
+                "receiver_id": to_user,
+                "ciphertext_b64": base64.b64encode(ciphertext).decode("ascii"),
+                "nonce_b64": base64.b64encode(b'dummy_nonce_for_now').decode("ascii"),  # 占位符
+                "mac_tag_b64": base64.b64encode(b'dummy_mac_for_now').decode("ascii"),  # 占位符
+                "ad_serialized": '{}',  # 序列化的附加数据
+                "timestamp": int(time.time()),
                 "ttl_seconds": ttl,
             },
         )
