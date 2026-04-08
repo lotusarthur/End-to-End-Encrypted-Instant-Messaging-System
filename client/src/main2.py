@@ -42,7 +42,7 @@ except ImportError:
 class ClientFacade:
     """客户端外观类，整合所有功能"""
 
-    def __init__(self, server_url: str = "http://localhost:80"):
+    def __init__(self, server_url: str = "https://ungladly-cremasterial-spring.ngrok-free.dev/"):
         """初始化客户端"""
         self.network_client = NetworkClient(server_url)
         self.ws_client = None
