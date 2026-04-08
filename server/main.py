@@ -333,6 +333,16 @@ class MessagingServer:
                 if not otp_code:
                     logger.debug("OTP验证失败: 未提供验证码")
                     return web.json_response({'error': '需要OTP验证码'}, status=401)
+                
+                # 格式化处理OTP验证码
+                otp_code = otp_code.strip()  # 去除空格
+                logger.debug(f"格式化后的OTP验证码: {otp_code}")
+                
+                # 验证格式
+                if not otp_code.isdigit() or len(otp_code) != 6:
+                    logger.debug("OTP验证失败: 验证码格式错误")
+                    return web.json_response({'error': 'OTP验证码格式错误，请输入6位数字'}, status=401)
+                
                 logger.debug(f"接收到的OTP验证码: {otp_code}")
                 totp = pyotp.TOTP(user.otp_secret)
                 current_code = totp.now()
