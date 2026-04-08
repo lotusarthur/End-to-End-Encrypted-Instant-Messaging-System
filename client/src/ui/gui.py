@@ -64,13 +64,17 @@ class FriendRequestWidget(QWidget):
         
         layout.addStretch()
         
-        self.accept_btn = QPushButton("接受")
+        #接受按钮
+        self.accept_btn = QPushButton()
+        accept_icon = qta.icon('fa5s.check', color=COLOR_SUCCESS)
+        self.accept_btn.setIcon(accept_icon)
+        self.accept_btn.setIconSize(QSize(24, 24))
+        self.accept_btn.setFixedSize(32, 32)
+        self.accept_btn.setToolTip("接受")
         self.accept_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLOR_SUCCESS};
-                font-weight: bold;
-                font-size: {FONT_SIZE}px;
+                border-radius: 16px;
             }}
             QPushButton:hover {{
                 background-color: rgba(39, 174, 96, 0.1);
@@ -78,21 +82,24 @@ class FriendRequestWidget(QWidget):
         """)
         self.accept_btn.clicked.connect(lambda: self.request_accepted.emit(self.request_id))
 
-        
-        self.decline_btn = QPushButton("拒绝")
+        # 拒绝按钮
+        self.decline_btn = QPushButton()
+        decline_icon = qta.icon('fa5s.times', color=COLOR_DANGER)
+        self.decline_btn.setIcon(decline_icon)
+        self.decline_btn.setIconSize(QSize(24, 24))
+        self.decline_btn.setFixedSize(32, 32)
+        self.decline_btn.setToolTip("拒绝")
         self.decline_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLOR_DANGER};
-                font-weight: bold;
-                font-size: {FONT_SIZE}px;
+                border-radius: 16px;
             }}
             QPushButton:hover {{
                 background-color: rgba(231, 76, 60, 0.1);
             }}
         """)
         self.decline_btn.clicked.connect(lambda: self.request_declined.emit(self.request_id))
-        
+
         layout.addWidget(self.accept_btn)
         layout.addWidget(self.decline_btn)
 
@@ -182,9 +189,12 @@ class FriendRequestPanel(QDialog):
         add_layout.addWidget(self.add_result)
         layout.addWidget(add_group)
         
+        # 标签页：收到的请求 / 已发送的请求
+        self.tab_widget = QTabWidget()
+        
         # 收到的请求区域
-        received_group = QGroupBox("收到的好友请求")
-        received_layout = QVBoxLayout(received_group)
+        received_widget = QWidget()
+        received_layout = QVBoxLayout(received_widget)
         
         self.received_scroll = QScrollArea()
         self.received_scroll.setWidgetResizable(True)
@@ -198,7 +208,27 @@ class FriendRequestPanel(QDialog):
         
         self.received_scroll.setWidget(self.received_container)
         received_layout.addWidget(self.received_scroll)
-        layout.addWidget(received_group)
+        
+        # 已发送的请求区域
+        sent_widget = QWidget()
+        sent_layout = QVBoxLayout(sent_widget)
+        
+        self.sent_scroll = QScrollArea()
+        self.sent_scroll.setWidgetResizable(True)
+        self.sent_scroll.setStyleSheet("border: none; background-color: transparent;")
+        
+        self.sent_container = QWidget()
+        self.sent_container.setStyleSheet("background-color: transparent;")
+        self.sent_layout = QVBoxLayout(self.sent_container)
+        self.sent_layout.setAlignment(Qt.AlignTop)
+        self.sent_layout.setSpacing(5)
+        
+        self.sent_scroll.setWidget(self.sent_container)
+        sent_layout.addWidget(self.sent_scroll)
+        
+        self.tab_widget.addTab(received_widget, "收到的请求")
+        self.tab_widget.addTab(sent_widget, "已发送的请求")
+        layout.addWidget(self.tab_widget)
         
         # 关闭按钮
         close_btn = QPushButton("关闭")
@@ -208,6 +238,7 @@ class FriendRequestPanel(QDialog):
     
     def load_data(self):
         self.load_received_requests()
+        self.load_sent_requests()
     
     def load_received_requests(self):
         self.clear_layout(self.received_layout)
@@ -228,6 +259,30 @@ class FriendRequestPanel(QDialog):
                 widget.request_accepted.connect(self.accept_request)
                 widget.request_declined.connect(self.decline_request)
                 self.received_layout.addWidget(widget)
+
+    def load_sent_requests(self):
+        """加载已发送的请求"""
+        self.clear_layout(self.sent_layout)
+        
+        # 获取已发送的请求
+        try:
+            sent_requests = self.client.network_client.get_friend_requests("sent")
+        except:
+            sent_requests = []
+        
+        if not sent_requests:
+            empty_label = QLabel("暂无已发送的好友请求")
+            empty_label.setStyleSheet("color: gray; padding: 20px;")
+            empty_label.setAlignment(Qt.AlignCenter)
+            self.sent_layout.addWidget(empty_label)
+        else:
+            for req in sent_requests:
+                to_user = req.get('to_user') or req.get('user_b', 'Unknown')
+                request_id = req.get('request_id') or req.get('id', '')
+                status = req.get('status', 'pending')
+                
+                widget = SentRequestWidget(request_id, to_user, status)
+                self.sent_layout.addWidget(widget)
     
     def clear_layout(self, layout):
         while layout.count():
@@ -236,6 +291,7 @@ class FriendRequestPanel(QDialog):
                 item.widget().deleteLater()
     
     def add_friend(self):
+        """添加好友"""
         username = self.add_input.text().strip()
         if not username:
             self.add_result.setText("请输入用户名")
@@ -252,6 +308,7 @@ class FriendRequestPanel(QDialog):
             self.add_result.setText(f"好友请求已发送给 {username}")
             self.add_result.setStyleSheet("color: green;")
             self.add_input.clear()
+            self.load_sent_requests()
         else:
             self.add_result.setText(f"发送失败，用户 {username} 可能不存在")
             self.add_result.setStyleSheet("color: red;")
@@ -271,6 +328,48 @@ class FriendRequestPanel(QDialog):
             self.load_received_requests()
         else:
             QMessageBox.warning(self, "失败", "拒绝好友请求失败")
+
+class SentRequestWidget(QWidget):
+    """已发送请求项组件"""
+    
+    def __init__(self, request_id, to_user, status, parent=None):
+        super().__init__(parent)
+        self.request_id = request_id
+        self.to_user = to_user
+        self.status = status
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLOR_WHITE};
+                border-radius: 8px;
+                margin: 2px;
+            }}
+            QWidget:hover {{
+                background-color: #f5f5f5;
+            }}
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 10, 15, 10)
+        
+        self.label = QLabel(f"发送给: {self.to_user}")
+        self.label.setStyleSheet(f"font-size: {FONT_SIZE}px; color: {COLOR_BLACK};")
+        layout.addWidget(self.label)
+        
+        layout.addStretch()
+        
+        # 状态显示
+        if self.status == "pending":
+            status_text = "等待接受"
+            status_color = COLOR_WARNING
+        else:
+            status_text = "已接受"
+            status_color = COLOR_SUCCESS
+        
+        self.status_label = QLabel(status_text)
+        self.status_label.setStyleSheet(f"color: {status_color}; font-size: {FONT_SIZE - 2}px; font-weight: bold;")
+        layout.addWidget(self.status_label)
 
 
 class ChatGUI(QMainWindow):
@@ -298,10 +397,6 @@ class ChatGUI(QMainWindow):
         self.setWindowTitle("Secure Chat")
         self.setGeometry(100, 100, 1200, 800)
         self.setMinimumSize(1000, 700)
-        
-        # 设置全局字体
-        global_font = QFont("华文仿宋", 12)
-        QApplication.setFont(global_font)
         
         # 设置全局样式
         self.setStyleSheet(f"""
@@ -347,6 +442,13 @@ class ChatGUI(QMainWindow):
             }}
             QSpinBox {{
                 font-size: {FONT_SIZE - 2}px;
+            }}
+            QToolTip {{
+                background-color: {COLOR_PRIMARY};
+                color: {COLOR_WHITE};
+                border: none;
+                font-size: 18px;
+                padding: 5px 10px;
             }}
         """)
         
@@ -672,13 +774,13 @@ class ChatGUI(QMainWindow):
                 self.notification_label = QLabel(self.add_friend_btn)
                 self.notification_label.setStyleSheet(f"""
                     background-color: {COLOR_DANGER};
-                    border-radius: 6px;
+                    border-radius: 3px;
                     min-width: 12px;
                     max-width: 12px;
                     min-height: 12px;
                     max-height: 12px;
                 """)
-                self.notification_label.move(22, 5)
+                self.notification_label.move(18, 0)
                 self.notification_label.resize(12, 12)
                 self.notification_label.raise_()
                 self.notification_label.show()
@@ -746,9 +848,28 @@ class ChatGUI(QMainWindow):
     def refresh_all(self):
         self.refresh_friends()
         self.check_pending_requests()
-    
+
     def refresh_friends(self):
+        """刷新好友列表"""
         friends = self.client.refresh_friends_list()
+        offline_messages = self.client.fetch_offline_messages()
+        
+        # 构建最后消息字典
+        last_msg_dict = {}
+        for msg in offline_messages:
+            sender = msg.get('from_user') or msg.get('sender_id', 'Unknown')
+            ciphertext = msg.get('ciphertext') or msg.get('ciphertext_b64', b'')
+            if isinstance(ciphertext, str):
+                import base64
+                try:
+                    text = base64.b64decode(ciphertext).decode('utf-8')
+                except:
+                    text = ciphertext
+            else:
+                text = ciphertext.decode('utf-8') if isinstance(ciphertext, bytes) else str(ciphertext)
+            
+            if sender not in last_msg_dict:
+                last_msg_dict[sender] = text
         
         self.friends_list.clear()
         
@@ -762,10 +883,18 @@ class ChatGUI(QMainWindow):
                 status = '● 在线' if friend.get('is_online', False) else '○ 离线'
                 display_text = f"{name}\n{status}"
             else:
-                display_text = str(friend)
+                name = str(friend)
+                display_text = name
+            
+            # 添加消息预览
+            last_msg = last_msg_dict.get(name, "")
+            if last_msg:
+                if len(last_msg) > 25:
+                    last_msg = last_msg[:22] + "..."
+                display_text = f"{name}\n{last_msg}"
             
             item = QListWidgetItem(display_text)
-            item.setData(Qt.UserRole, name if isinstance(friend, dict) else str(friend))
+            item.setData(Qt.UserRole, name)
             self.friends_list.addItem(item)
     
     def on_friend_selected(self, item: QListWidgetItem):
@@ -807,16 +936,36 @@ class ChatGUI(QMainWindow):
             self.polling_thread.join(timeout=2)
     
     def poll_messages(self):
+        """轮询新消息"""
         import time
+        last_msg_count = 0
+        last_request_count = 0
+        
         while self.polling_running:
             try:
                 if self.current_user:
-                    self.refresh_friends()
-                    self.check_pending_requests()
+                    # 检查新消息数量
+                    messages = self.client.fetch_offline_messages()
+                    current_msg_count = len(messages)
+                    
+                    # 检查好友请求数量
+                    requests = self.client.get_friend_requests()
+                    current_request_count = len(requests)
+                    
+                    
+                    if current_request_count != last_request_count:
+                        last_request_count = current_request_count
+                        # 有新的好友请求，更新红点
+                        self.check_pending_requests()
+                    
+                    last_msg_count = current_msg_count
+                    last_request_count = current_request_count
+                    
+                time.sleep(3)  # 每3秒检查一次
+            except Exception as e:
+                print(f"轮询错误: {e}")
                 time.sleep(3)
-            except:
-                pass
-    
+        
     def show_otp_generator(self):
         otp_secret, ok = QInputDialog.getText(self, "生成OTP验证码", "请输入OTP密钥:")
         if ok and otp_secret:
@@ -1044,7 +1193,6 @@ class LoginDialog(QDialog):
             QLineEdit {{
                 border: 1px solid #e0e0e0;
                 border-radius: 10px;
-                padding: 14px;
                 font-size: {FONT_SIZE}px;
             }}
             QLineEdit:focus {{
@@ -1181,8 +1329,9 @@ class LoginDialog(QDialog):
 
         register_layout.addRow("用户名:", self.register_username)
         register_layout.addRow("密码:", self.register_password)
-        register_layout.addRow("确认密码:", self.register_confirm_password)  # 添加这一行
+        register_layout.addRow("确认密码:", self.register_confirm_password)
 
+        # 密码提示
         password_hint = QLabel("密码长度至少为6位")
         password_hint.setStyleSheet(f"color: #888; font-size: {FONT_SIZE - 4}px;")
         register_layout.addRow("", password_hint)
@@ -1192,10 +1341,20 @@ class LoginDialog(QDialog):
         self.register_btn.clicked.connect(self.on_register)
         register_layout.addRow(self.register_btn)
 
+        # 注册说明
         register_hint = QLabel("注册成功后会生成OTP密钥，请妥善保存")
+        register_hint.setAlignment(Qt.AlignCenter)
         register_hint.setStyleSheet(f"color: #888; font-size: {FONT_SIZE - 4}px;")
         register_hint.setWordWrap(True)
-        register_layout.addRow("", register_hint)
+
+        # 创建水平布局
+        hint_layout = QHBoxLayout()
+        hint_layout.addStretch()
+        hint_layout.addWidget(register_hint)
+        hint_layout.addStretch()
+
+        # 添加到表单布局
+        register_layout.addRow(hint_layout)
 
         self.tab_widget.addTab(login_widget, "登录")
         self.tab_widget.addTab(register_widget, "注册")
@@ -1280,32 +1439,26 @@ class LoginDialog(QDialog):
 def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
-    
-    global_font = QFont("华文仿宋", 10)
-    app.setFont(global_font)
-    
+
     main_window_ref = [None]
     
     def on_login_success(username, password, otp):
         client = ClientFacade(server_url="http://localhost:80")
         if client.login_user(username, password, otp):
-
-            # 先创建并显示主窗口
             main_window_ref[0] = ChatGUI(client)
             main_window_ref[0].show()
             
-            # 关闭登录对话框
             for widget in app.topLevelWidgets():
                 if isinstance(widget, LoginDialog):
                     widget.close()
             
-            # 在后台线程中加载数据
-            def load_data():
-                main_window_ref[0].refresh_all()
-                main_window_ref[0].start_polling()
+            def load_initial_data():
+                main_window_ref[0].refresh_friends()
                 main_window_ref[0].check_pending_requests()
+                # 启动轮询
+                main_window_ref[0].start_polling()
             
-            threading.Thread(target=load_data, daemon=True).start()
+            threading.Thread(target=load_initial_data, daemon=True).start()
         else:
             QMessageBox.warning(None, "登录失败", "用户名、密码或OTP验证码错误")
         
