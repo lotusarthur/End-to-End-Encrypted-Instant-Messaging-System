@@ -487,9 +487,31 @@ def main():
 
 if __name__ == "__main__":
     try:
+        # 导入必要的模块
+        import os
         from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import QCoreApplication
         from ui.gui import LoginDialog, ChatGUI
         
+        # 手动设置 Qt 平台插件路径
+        # 尝试不同的可能路径
+        pyqt5_paths = [
+            os.path.join(os.path.dirname(__file__), '..', '..', '..', 'Lib', 'site-packages', 'PyQt5', 'Qt5', 'plugins'),
+            os.path.join(os.environ.get('APPDATA', ''), 'Python', 'Python39', 'site-packages', 'PyQt5', 'Qt5', 'plugins'),
+            os.path.join(os.path.dirname(os.__file__), 'site-packages', 'PyQt5', 'Qt5', 'plugins')
+        ]
+        
+        for path in pyqt5_paths:
+            if os.path.exists(os.path.join(path, 'platforms', 'qwindows.dll')):
+                os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.path.join(path, 'platforms')
+                print(f"设置 Qt 平台插件路径: {os.environ['QT_QPA_PLATFORM_PLUGIN_PATH']}")
+                break
+        
+        # 确保平台插件路径被正确设置
+        if 'QT_QPA_PLATFORM_PLUGIN_PATH' not in os.environ:
+            print("警告: 未找到 Qt 平台插件路径，可能会导致启动失败")
+        
+        # 创建应用
         app = QApplication(sys.argv)
         app.setStyle('Fusion')
         
@@ -526,9 +548,19 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"无法启动图形界面: {e}")
         print("请确保已安装 PyQt5: pip install PyQt5")
+        # 回退到命令行界面
+        main()
     except Exception as e:
         print(f"启动失败: {e}")
         import traceback
         traceback.print_exc()
-        # 如果 GUI 启动失败，回退到命令行界面
+        
+        # 检查是否是 Qt 平台插件错误
+        if "Could not find the Qt platform plugin" in str(e):
+            print("\nQt 平台插件错误: 无法找到 'windows' 平台插件")
+            print("这通常是因为 PyQt5 安装不完整或环境变量配置不正确")
+            print("建议尝试重新安装 PyQt5: pip install --force-reinstall PyQt5")
+            print("或者手动设置 QT_QPA_PLATFORM_PLUGIN_PATH 环境变量指向包含 qwindows.dll 的目录")
+        
+        # 回退到命令行界面
         main()
