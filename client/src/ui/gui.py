@@ -577,22 +577,6 @@ class ChatGUI(QMainWindow):
         bottom_layout = QVBoxLayout(bottom_widget)
         bottom_layout.setSpacing(12)
         
-        self.btn_otp = QPushButton("生成OTP")
-        self.btn_otp.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLOR_SECONDARY};
-                color: {COLOR_WHITE};
-                padding: 12px;
-                font-size: {FONT_SIZE}px;
-                border-radius: 10px;
-            }}
-            QPushButton:hover {{
-                background-color: #6c7a8a;
-            }}
-        """)
-        self.btn_otp.clicked.connect(self.show_otp_generator)
-        bottom_layout.addWidget(self.btn_otp)
-        
         self.btn_upload_key = QPushButton("上传公钥")
         self.btn_upload_key.setStyleSheet(f"""
             QPushButton {{
