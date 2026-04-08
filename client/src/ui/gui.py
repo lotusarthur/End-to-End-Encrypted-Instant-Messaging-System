@@ -300,7 +300,7 @@ class ChatGUI(QMainWindow):
         self.setMinimumSize(1000, 700)
         
         # 设置全局字体
-        global_font = QFont("Microsoft YaHei", 12)
+        global_font = QFont("华文仿宋", 12)
         QApplication.setFont(global_font)
         
         # 设置全局样式
@@ -312,7 +312,6 @@ class ChatGUI(QMainWindow):
                 border: none;
                 outline: none;
                 background-color: transparent;
-                font-family: "HYQiHei";
             }}
             QListWidget::item {{
                 padding: 15px;
@@ -332,14 +331,12 @@ class ChatGUI(QMainWindow):
                 border-radius: 12px;
                 padding: 15px;
                 font-size: {FONT_SIZE}px;
-                font-family: "HYQiHei";
             }}
             QPushButton {{
                 border: none;
                 border-radius: 10px;
                 font-weight: bold;
                 font-size: {FONT_SIZE}px;
-                font-family: "HYQiHei";
             }}
             QScrollArea {{
                 border: none;
@@ -347,11 +344,9 @@ class ChatGUI(QMainWindow):
             }}
             QLabel {{
                 font-size: {FONT_SIZE}px;
-                font-family: "HYQiHei";
             }}
             QSpinBox {{
                 font-size: {FONT_SIZE - 2}px;
-                font-family: "HYQiHei";
             }}
         """)
         
@@ -581,7 +576,6 @@ class ChatGUI(QMainWindow):
                 background-color: #f8f9fa;
                 border: none;
                 padding: 25px;
-                font-family: "HYQiHei";
                 font-size: {FONT_SIZE}px;
             }}
         """)
@@ -603,7 +597,6 @@ class ChatGUI(QMainWindow):
                 border-radius: 12px;
                 padding: 15px;
                 font-size: {FONT_SIZE}px;
-                font-family: "HYQiHei";
             }}
             QTextEdit:focus {{
                 border: 1px solid {COLOR_INFO};
@@ -1053,7 +1046,6 @@ class LoginDialog(QDialog):
                 border-radius: 10px;
                 padding: 14px;
                 font-size: {FONT_SIZE}px;
-                font-family: "HYQiHei";
             }}
             QLineEdit:focus {{
                 border: 1px solid {COLOR_INFO};
@@ -1066,7 +1058,6 @@ class LoginDialog(QDialog):
                 font-weight: bold;
                 padding: 14px;
                 font-size: {FONT_SIZE}px;
-                font-family: "HYQiHei";
             }}
             QPushButton:hover {{
                 background-color: {COLOR_SECONDARY};
@@ -1083,7 +1074,6 @@ class LoginDialog(QDialog):
                 padding: 12px 40px;
                 font-size: {FONT_SIZE}px;
                 font-weight: bold;
-                font-family: "HYQiHei";
             }}
             QTabBar::tab:selected {{
                 background-color: {COLOR_PRIMARY};
@@ -1091,7 +1081,6 @@ class LoginDialog(QDialog):
             }}
             QLabel {{
                 font-size: {FONT_SIZE}px;
-                font-family: "HYQiHei";
             }}
         """)
         
@@ -1292,7 +1281,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     
-    global_font = QFont("Microsoft YaHei", 10)
+    global_font = QFont("华文仿宋", 10)
     app.setFont(global_font)
     
     main_window_ref = [None]
