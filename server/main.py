@@ -73,7 +73,18 @@ class WebSocketManager:
         """向指定用户发送消息"""
         if username in self.connections:
             try:
-                await self.connections[username].send(json.dumps(message))
+                # 检查WebSocket对象类型，使用正确的发送方法
+                ws = self.connections[username]
+                message_str = json.dumps(message)
+                # 对于aiohttp的WebSocketResponse
+                if hasattr(ws, 'send_str'):
+                    await ws.send_str(message_str)
+                # 对于websockets库的WebSocketServerProtocol
+                elif hasattr(ws, 'send'):
+                    await ws.send(message_str)
+                else:
+                    logger.error(f"未知的WebSocket类型: {type(ws)}")
+                    return False
                 return True
             except Exception as e:
                 logger.error(f"向用户 {username} 发送消息失败: {e}")
