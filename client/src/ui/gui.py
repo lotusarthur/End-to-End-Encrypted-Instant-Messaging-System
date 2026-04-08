@@ -387,13 +387,11 @@ class ChatGUI(QMainWindow):
         
         self.setup_ui()
         
-        self.polling_running = False
-        self.polling_thread = None
-        
         if self.current_user:
             self.user_label.setText(self.current_user)
             self.refresh_all()
-            self.start_polling()
+            # 建立WebSocket连接，替代轮询机制
+            self.client.setup_websocket_listener()
             self.check_pending_requests()
 
     def setup_ui(self):
@@ -795,7 +793,6 @@ class ChatGUI(QMainWindow):
         self.friends_list.clear()
         self.messages_text.clear()
         self.chat_title.setText("请选择好友开始聊天")
-        self.stop_polling()
         self.hide()
         
         for widget in QApplication.topLevelWidgets():
@@ -912,46 +909,7 @@ class ChatGUI(QMainWindow):
                 time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M") if timestamp else "?"
                 self.messages_text.append(f"[{time_str}] {sender}: {text}")
     
-    def start_polling(self):
-        self.polling_running = True
-        self.polling_thread = threading.Thread(target=self.poll_messages, daemon=True)
-        self.polling_thread.start()
-    
-    def stop_polling(self):
-        self.polling_running = False
-        if self.polling_thread:
-            self.polling_thread.join(timeout=2)
-    
-    def poll_messages(self):
-        """轮询新消息"""
-        import time
-        last_msg_count = 0
-        last_request_count = 0
-        
-        while self.polling_running:
-            try:
-                if self.current_user:
-                    # 检查新消息数量
-                    messages = self.client.fetch_offline_messages()
-                    current_msg_count = len(messages)
-                    
-                    # 检查好友请求数量
-                    requests = self.client.get_friend_requests()
-                    current_request_count = len(requests)
-                    
-                    
-                    if current_request_count != last_request_count:
-                        last_request_count = current_request_count
-                        # 有新的好友请求，更新红点
-                        self.check_pending_requests()
-                    
-                    last_msg_count = current_msg_count
-                    last_request_count = current_request_count
-                    
-                time.sleep(3)  # 每3秒检查一次
-            except Exception as e:
-                print(f"轮询错误: {e}")
-                time.sleep(3)
+
         
     def show_otp_generator(self):
         otp_secret, ok = QInputDialog.getText(self, "生成OTP验证码", "请输入OTP密钥:")
