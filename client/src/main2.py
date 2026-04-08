@@ -98,20 +98,24 @@ class ClientFacade:
             print("登录时需要使用OTP应用生成的6位数字验证码")
 
             # 生成身份密钥对
-            private_key_b64, public_key_b64 = IdentityManager.generate_identity_keypair()
+            pri_key, pub_key = IdentityManager.generate_identity_keypair()
+            private_key_b64 = base64.b64encode(pri_key).decode('utf-8')
             self._save_private_key_local(username, private_key_b64)
             print(f"私钥已保存到本地文件: {self._private_key_file(username)}")
 
             # 注册用户
             result = self.network_client.register(username, password, otp_secret)
             print(f"注册成功: {result}")
+            print("上传的公钥长度: ", len(pub_key))
 
             # 自动登录并上传公钥
             otp_code = IdentityManager.generate_otp_code(otp_secret)
             self.network_client.login(username, password, otp_code)
             self.token = self.network_client.token
-            self.network_client.update_public_key(public_key_b64.encode("utf-8"))
+            self.network_client.update_public_key(pub_key)
             print("身份公钥已上传到服务器")
+
+            private_key_b64 = base64.b64encode(pri_key).decode('utf-8')
 
             # 保持登录状态（用户无需再次登录）
             self.current_user = username
@@ -178,6 +182,7 @@ class ClientFacade:
                 return False
             result = self.network_client.update_public_key(public_key)
             print(f"公钥上传成功: {result}")
+            print("上传的公钥长度: ", len(public_key))
             return True
         except Exception as e:
             print(f"公钥上传失败: {str(e)}")
@@ -188,6 +193,8 @@ class ClientFacade:
         try:
             # api_client 直接返回 base64 编码的字符串
             public_key_b64 = self.network_client.get_public_key(username)
+            print("拉取：len(public_key_b64)")
+            print(len(public_key_b64))
 
             if not self.crypto_engine:
                 print("错误：安全引擎尚未初始化，无法建立加密会话")
