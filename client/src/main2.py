@@ -287,8 +287,13 @@ class ClientFacade:
                 ttl_seconds=ttl
             )
 
-            # 发送加密包
-            message_id = self.network_client.send_message(target_user, encrypted_pkg, ttl)
+            # 发送加密包 - 由于 encrypted_pkg 已经是符合服务器格式的字典，直接使用
+            result = self.network_client._make_request(
+                "POST",
+                "/messages",
+                encrypted_pkg
+            )
+            message_id = result.get("message_id")
             print(f"消息已发送给 {target_user}，ID: {message_id}")
             return True
         except Exception as e:
@@ -332,8 +337,10 @@ class ClientFacade:
     def setup_websocket_listener(self):
         """设置WebSocket监听器，解密实时消息"""
         if self.ws_client is None:
+            # 使用wss协议而不是https协议
+            server_url = self.network_client.server_url.replace("http://", "ws://").replace("https://", "wss://")
             self.ws_client = WebSocketClient(
-                "https://ungladly-cremasterial-spring.ngrok-free.dev/",
+                server_url,
                 self.network_client.token
             )
 
