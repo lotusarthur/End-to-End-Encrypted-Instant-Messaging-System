@@ -71,7 +71,24 @@ class IdentityManager:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw
         )
-        return base64.b64encode(pri_bytes).decode('utf-8'), base64.b64encode(pub_bytes).decode('utf-8')
+        
+        # 验证密钥长度
+        if len(pri_bytes) != 32:
+            raise ValueError(f"Invalid private key length: {len(pri_bytes)} bytes, expected 32 bytes")
+        if len(pub_bytes) != 32:
+            raise ValueError(f"Invalid public key length: {len(pub_bytes)} bytes, expected 32 bytes")
+        
+        # 编码为 Base64
+        private_key_b64 = base64.b64encode(pri_bytes).decode('utf-8')
+        public_key_b64 = base64.b64encode(pub_bytes).decode('utf-8')
+        
+        # 验证 Base64 编码后的长度（用于调试）
+        print(f"生成的私钥 (Base64): {private_key_b64[:20]}... (长度: {len(private_key_b64)})")
+        print(f"生成的公钥 (Base64): {public_key_b64[:20]}... (长度: {len(public_key_b64)})")
+        print(f"解码后的私钥长度: {len(pri_bytes)} bytes")
+        print(f"解码后的公钥长度: {len(pub_bytes)} bytes")
+        
+        return private_key_b64, public_key_b64
 
     @staticmethod
     def generate_fingerprint(public_key_b64: str) -> str:
@@ -109,10 +126,16 @@ class SessionManager:
                 raise PermissionError(f"CRITICAL: Key change detected for {contact_id}. Must re-verify fingerprint!")
         else:
             self.storage.save_contact_key(contact_id, contact_public_key_b64)
+        
+        # 验证公钥格式
+        try:
+            public_key_bytes = base64.b64decode(contact_public_key_b64)
+            if len(public_key_bytes) != 32:
+                raise ValueError(f"Invalid X25519 public key length: {len(public_key_bytes)} bytes, expected 32 bytes")
             
-        contact_pub_key = x25519.X25519PublicKey.from_public_bytes(
-            base64.b64decode(contact_public_key_b64)
-        )
+            contact_pub_key = x25519.X25519PublicKey.from_public_bytes(public_key_bytes)
+        except Exception as e:
+            raise ValueError(f"Invalid public key format: {str(e)}")
         
         # 2. ECDH 交换计算共享秘密 (保持原样)
         shared_secret = self.private_key.exchange(contact_pub_key)
