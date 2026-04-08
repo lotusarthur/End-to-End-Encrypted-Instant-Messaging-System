@@ -56,14 +56,14 @@ class NetworkClient:
         return False
 
     # User and public key methods
-    def get_public_key(self, username: str) -> bytes:
+    def get_public_key(self, username: str) -> str:
         """Get user public key."""
         result = self._make_request("GET", f"/users/{username}/public-key")
         print(f"服务器返回的公钥数据: {result}")
         key_b64 = result.get("identity_public_key")
         if not key_b64:
             raise RuntimeError("public key missing")
-        return base64.b64decode(key_b64)
+        return key_b64
 
     def get_my_info(self) -> dict:
         """Get current user info."""
