@@ -703,6 +703,18 @@ class MessagingServer:
             )
             self.db.store_message(message)
             
+            # 检查消息是否过期
+            current_time = int(time.time())
+            if timestamp + ttl_seconds < current_time:
+                # 消息已过期，删除
+                conn = self.db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM messages WHERE message_id = ?', (message_id,))
+                conn.commit()
+                conn.close()
+                logger.info(f"消息 {message_id} 已过期，已删除")
+                return web.json_response({'error': '消息已过期'}, status=400)
+            
             # 如果目标用户在线，实时转发
             if self.ws_manager.is_user_online(receiver_id):
                 await self.ws_manager.send_to_user(receiver_id, {
@@ -781,7 +793,23 @@ class MessagingServer:
             
             # 发送离线消息
             offline_messages = self.db.get_offline_messages(username)
+            current_time = int(time.time())
+            valid_messages = []
+            
+            # 过滤掉过期消息
             for msg in offline_messages:
+                if msg.timestamp + msg.ttl_seconds >= current_time:
+                    valid_messages.append(msg)
+                else:
+                    # 删除过期消息
+                    conn = self.db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('DELETE FROM messages WHERE message_id = ?', (msg.message_id,))
+                    conn.commit()
+                    conn.close()
+            
+            # 发送有效的离线消息
+            for msg in valid_messages:
                 await ws.send(json.dumps({
                     'type': 'message',
                     'message_id': msg.message_id,
@@ -867,6 +895,18 @@ class MessagingServer:
                 signature=mac_tag_b64  # 使用mac_tag作为签名
             )
             self.db.store_message(message)
+            
+            # 检查消息是否过期
+            current_time = int(time.time())
+            if timestamp + ttl_seconds < current_time:
+                # 消息已过期，删除
+                conn = self.db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM messages WHERE message_id = ?', (message_id,))
+                conn.commit()
+                conn.close()
+                logger.info(f"WebSocket消息 {message_id} 已过期，已删除")
+                return
             
             # 如果目标用户在线，实时转发完整的EncryptedNetworkPackage
             if self.ws_manager.is_user_online(receiver_id):

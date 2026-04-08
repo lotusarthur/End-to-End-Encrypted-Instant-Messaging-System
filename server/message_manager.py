@@ -122,17 +122,17 @@ class MessageManager:
             current_time = int(time.time())
             cursor.execute('''
                 SELECT message_id FROM messages 
-                WHERE timestamp + ttl_seconds < ? AND status != 'expired'
+                WHERE timestamp + ttl_seconds < ?
             ''', (current_time,))
             
             expired_messages = cursor.fetchall()
             expired_count = len(expired_messages)
             
             if expired_count > 0:
-                # 标记过期消息
+                # 删除过期消息
                 cursor.execute('''
-                    UPDATE messages SET status = 'expired' 
-                    WHERE timestamp + ttl_seconds < ? AND status != 'expired'
+                    DELETE FROM messages 
+                    WHERE timestamp + ttl_seconds < ?
                 ''', (current_time,))
                 
                 # 从待投递列表中移除过期消息

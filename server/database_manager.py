@@ -312,11 +312,12 @@ class DatabaseManager:
         """获取用户的离线消息 - 适配加密包格式"""
         conn = self._get_connection()
         cursor = conn.cursor()
+        current_time = int(time.time())
         cursor.execute('''
             SELECT * FROM messages 
-            WHERE receiver_id = ? AND status = 'sent'
+            WHERE receiver_id = ? AND status = 'sent' AND timestamp + ttl_seconds >= ?
             ORDER BY timestamp ASC
-        ''', (username,))
+        ''', (username, current_time))
         
         rows = cursor.fetchall()
         conn.close()
