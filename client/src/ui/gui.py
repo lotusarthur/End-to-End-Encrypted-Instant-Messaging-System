@@ -16,6 +16,7 @@ for path in [client_src_dir, project_root]:
         sys.path.insert(0, path)
 
 from main2 import ClientFacade
+from crypto.core import IdentityManager
 
 
 class FriendRequestWidget(QWidget):
@@ -586,28 +587,35 @@ class ChatGUI(QMainWindow):
         
     def refresh_conversations(self):
         """刷新会话列表 - 不清空，直接更新"""
-        friends = self.client.friends_list
+        # 从客户端获取会话列表
+        conversations = self.client.get_conversations()
         
-        if not friends:
+        if not conversations:
             if self.conversations_list.count() == 0:
                 self.conversations_list.addItem("暂无会话")
             return
         
         # 构建新数据字典
         new_conversations = {}
-        for friend in friends:
-            if isinstance(friend, dict):
-                name = friend.get('username', 'Unknown')
-            else:
-                name = str(friend)
-            new_conversations[name] = name
+        for conv in conversations:
+            name = conv.get('peer_user_id', 'Unknown')
+            unread_count = conv.get('unread_count', 0)
+            display_text = name
+            if unread_count > 0:
+                display_text = f"{name} ({unread_count} 未读)"
+            new_conversations[name] = display_text
             self.friend_to_conv_id[name] = name
         
         # 更新现有项或添加新项
         existing_names = set()
         for i in range(self.conversations_list.count()):
             item = self.conversations_list.item(i)
-            old_name = item.text()
+            item_text = item.text()
+            # 从显示文本中提取用户名
+            if " (" in item_text:
+                old_name = item_text.split(" (")[0]
+            else:
+                old_name = item_text
             
             if old_name == "暂无会话":
                 self.conversations_list.takeItem(i)
@@ -616,15 +624,17 @@ class ChatGUI(QMainWindow):
             existing_names.add(old_name)
             
             if old_name in new_conversations:
-                # 存在，标记为已处理
+                # 更新现有项
+                if item.text() != new_conversations[old_name]:
+                    item.setText(new_conversations[old_name])
                 del new_conversations[old_name]
             else:
                 # 不再存在，删除
                 self.conversations_list.takeItem(i)
         
         # 添加新项
-        for name in new_conversations.values():
-            item = QListWidgetItem(name)
+        for name, display_text in new_conversations.items():
+            item = QListWidgetItem(display_text)
             item.setData(Qt.UserRole, name)
             self.conversations_list.addItem(item)
     
@@ -648,24 +658,23 @@ class ChatGUI(QMainWindow):
     
     def load_offline_messages(self, friend_name: str):
         """加载与好友的离线消息"""
-        messages = self.client.fetch_offline_messages()
+        # 从本地数据库获取消息历史
+        messages = self.client.get_messages(friend_name)
         
         for msg in messages:
-            sender = msg.get('from_user') or msg.get('sender_id', 'Unknown')
-            if sender == friend_name:
-                ciphertext = msg.get('ciphertext') or msg.get('ciphertext_b64', b'')
-                if isinstance(ciphertext, str):
-                    import base64
-                    try:
-                        text = base64.b64decode(ciphertext).decode('utf-8')
-                    except:
-                        text = ciphertext
-                else:
-                    text = ciphertext.decode('utf-8') if isinstance(ciphertext, bytes) else str(ciphertext)
-                
-                timestamp = msg.get('timestamp', 0)
-                time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M") if timestamp else "?"
+            sender = msg.get('sender_id', 'Unknown')
+            text = msg.get('text', '')
+            timestamp = msg.get('created_at', 0)
+            direction = msg.get('direction', 'incoming')
+            
+            time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M") if timestamp else "?"
+            if direction == 'outgoing':
+                self.messages_text.append(f"[{time_str}] 我: {text}")
+            else:
                 self.messages_text.append(f"[{time_str}] {sender}: {text}")
+        
+        # 标记消息为已读
+        self.client.storage.mark_messages_read(friend_name)
     
     def start_polling(self):
         """启动消息轮询"""
@@ -771,8 +780,39 @@ class LoginDialog(QDialog):
         register_hint.setStyleSheet("color: gray; font-size: 20px;")
         register_layout.addRow("", register_hint)
         
+        # OTP验证码标签页
+        otp_widget = QWidget()
+        otp_layout = QVBoxLayout(otp_widget)
+        otp_layout.setSpacing(15)
+        otp_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # OTP密钥输入
+        self.otp_secret_input = QLineEdit()
+        self.otp_secret_input.setPlaceholderText("请输入OTP密钥")
+        otp_layout.addWidget(QLabel("OTP密钥:"))
+        otp_layout.addWidget(self.otp_secret_input)
+        
+        # 生成按钮
+        self.generate_otp_btn = QPushButton("生成验证码")
+        self.generate_otp_btn.setFixedHeight(35)
+        self.generate_otp_btn.clicked.connect(self.generate_otp)
+        otp_layout.addWidget(self.generate_otp_btn)
+        
+        # 验证码显示
+        self.otp_code_label = QLabel("")
+        self.otp_code_label.setAlignment(Qt.AlignCenter)
+        self.otp_code_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #27ae60;")
+        otp_layout.addWidget(self.otp_code_label)
+        
+        # 提示信息
+        self.otp_hint_label = QLabel("")
+        self.otp_hint_label.setAlignment(Qt.AlignCenter)
+        self.otp_hint_label.setStyleSheet("color: gray; font-size: 14px;")
+        otp_layout.addWidget(self.otp_hint_label)
+        
         self.tab_widget.addTab(login_widget, "登录")
         self.tab_widget.addTab(register_widget, "注册")
+        self.tab_widget.addTab(otp_widget, "OTP验证码")
         layout.addWidget(self.tab_widget)
     
     def on_login(self):
@@ -812,7 +852,7 @@ class LoginDialog(QDialog):
             msg_box.setText(f"用户 {username} 注册成功！")
             msg_box.setInformativeText(
                 f"OTP密钥: {otp_secret}\n\n"
-                "请保存此密钥，用于设置OTP应用（如Google Authenticator）\n"
+                "请保存此密钥\n"
                 "登录时需要使用OTP应用生成的6位数字验证码。"
             )
             msg_box.setStandardButtons(QMessageBox.Ok)
@@ -823,6 +863,20 @@ class LoginDialog(QDialog):
             self.login_otp.setFocus()
         else:
             QMessageBox.warning(self, "注册失败", "用户名已存在或注册失败")
+    
+    def generate_otp(self):
+        """生成OTP验证码"""
+        otp_secret = self.otp_secret_input.text().strip()
+        if not otp_secret:
+            QMessageBox.warning(self, "错误", "OTP密钥不能为空!")
+            return
+        
+        try:
+            otp_code = IdentityManager.generate_otp_code(otp_secret)
+            self.otp_code_label.setText(f"当前OTP验证码: {otp_code}")
+            self.otp_hint_label.setText("此验证码将在30秒后失效")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"生成OTP验证码失败: {str(e)}")
 
 
 def main():
