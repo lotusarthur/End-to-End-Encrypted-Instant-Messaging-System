@@ -6,6 +6,9 @@ from datetime import datetime
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
+import base64
+from cryptography.hazmat.primitives import serialization
+from datetime import datetime
 
 # 添加路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1419,6 +1422,364 @@ class LoginDialog(QDialog):
         else:
             QMessageBox.warning(self, "注册失败", "用户名已存在或注册失败")
 
+class KeyConfigDialog(QDialog):
+    """私钥与公钥配置对话框"""
+    
+    def __init__(self, client, username, parent=None):
+        super().__init__(parent)
+        self.client = client          # 已登录的 ClientFacade 实例
+        self.username = username
+        self.private_key_b64 = None
+        self.public_key_b64 = None
+        self.setup_ui()
+        self.check_existing_key()
+    
+    def setup_ui(self):
+        self.setWindowTitle("安全配置 - 密钥初始化")
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(500)
+        self.setModal(True)
+        
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {COLOR_WHITE};
+            }}
+            QLabel {{
+                font-size: {FONT_SIZE}px;
+            }}
+            QGroupBox {{
+                font-weight: bold;
+                font-size: {FONT_SIZE}px;
+                border: 1px solid #e0e0e0;
+                border-radius: 10px;
+                margin-top: 12px;
+                padding-top: 12px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }}
+            QTextEdit, QLineEdit {{
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                padding: 8px;
+                font-size: {FONT_SIZE - 2}px;
+            }}
+            QPushButton {{
+                background-color: {COLOR_PRIMARY};
+                color: {COLOR_WHITE};
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: {FONT_SIZE}px;
+                padding: 10px 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLOR_SECONDARY};
+            }}
+            QPushButton#danger {{
+                background-color: {COLOR_DANGER};
+            }}
+            QPushButton#danger:hover {{
+                background-color: #c0392b;
+            }}
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        # 标题
+        title = QLabel("端到端加密密钥配置")
+        title.setStyleSheet(f"font-size: {FONT_SIZE + 6}px; font-weight: bold; color: {COLOR_PRIMARY};")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        
+        desc = QLabel("为保证消息安全，需要为您的账户配置身份密钥。\n请选择以下方式之一完成配置：")
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setStyleSheet(f"color: {COLOR_SECONDARY}; margin-bottom: 10px;")
+        layout.addWidget(desc)
+        
+        # 状态显示区域
+        self.status_group = QGroupBox("当前状态")
+        status_layout = QVBoxLayout(self.status_group)
+        self.status_label = QLabel("正在检测密钥状态...")
+        self.status_label.setWordWrap(True)
+        status_layout.addWidget(self.status_label)
+        layout.addWidget(self.status_group)
+        
+        # 操作区域
+        self.action_group = QGroupBox("配置操作")
+        action_layout = QVBoxLayout(self.action_group)
+        
+        # 公钥指纹显示
+        fingerprint_layout = QHBoxLayout()
+        fingerprint_layout.addWidget(QLabel("公钥指纹:"))
+        self.fingerprint_label = QLabel("未生成")
+        self.fingerprint_label.setStyleSheet("font-family: monospace; font-weight: bold; color: #2c3e50;")
+        self.fingerprint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        fingerprint_layout.addWidget(self.fingerprint_label)
+        fingerprint_layout.addStretch()
+        action_layout.addLayout(fingerprint_layout)
+        
+        # 生成按钮
+        self.generate_btn = QPushButton("生成新的密钥对")
+        self.generate_btn.setIcon(qta.icon('fa5s.key', color='white'))
+        self.generate_btn.clicked.connect(self.generate_keypair)
+        action_layout.addWidget(self.generate_btn)
+        
+        # 导入按钮
+        self.import_btn = QPushButton("从文件导入私钥")
+        self.import_btn.setIcon(qta.icon('fa5s.folder-open', color='white'))
+        self.import_btn.clicked.connect(self.import_private_key)
+        action_layout.addWidget(self.import_btn)
+        
+        # 上传按钮（仅在已有私钥但未上传时显示）
+        self.upload_btn = QPushButton("上传公钥到服务器")
+        self.upload_btn.setIcon(qta.icon('fa5s.cloud-upload-alt', color='white'))
+        self.upload_btn.setVisible(False)
+        self.upload_btn.clicked.connect(self.upload_public_key)
+        action_layout.addWidget(self.upload_btn)
+        
+        layout.addWidget(self.action_group)
+        
+        # 提示信息
+        self.info_label = QLabel("")
+        self.info_label.setWordWrap(True)
+        self.info_label.setStyleSheet(f"color: {COLOR_INFO}; font-size: {FONT_SIZE - 2}px;")
+        layout.addWidget(self.info_label)
+        
+        # 按钮区域
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        self.finish_btn = QPushButton("完成并进入聊天")
+        self.finish_btn.setFixedHeight(45)
+        self.finish_btn.setEnabled(False)
+        self.finish_btn.clicked.connect(self.on_finish)
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setFixedHeight(45)
+        cancel_btn.setStyleSheet(f"background-color: {COLOR_SECONDARY};")
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(self.finish_btn)
+        layout.addLayout(btn_layout)
+    
+    def check_existing_key(self):
+        """检查本地是否存在私钥，以及服务器是否存在公钥"""
+        private_key_path = self.client._private_key_file(self.username)
+        local_key_exists = os.path.exists(private_key_path)
+        
+        server_has_key = False
+        server_key_matches = False
+        server_public_key_b64 = None
+        
+        try:
+            pub_bytes = self.client.network_client.get_public_key(self.username)
+            if pub_bytes:
+                server_public_key_b64 = base64.b64encode(pub_bytes).decode('utf-8')
+                server_has_key = True
+        except Exception:
+            server_has_key = False
+        
+        if local_key_exists:
+            try:
+                with open(private_key_path, 'r') as f:
+                    self.private_key_b64 = f.read().strip()
+                # 从私钥计算公钥
+                from crypto.core import IdentityManager
+                pri_bytes = base64.b64decode(self.private_key_b64)
+                from cryptography.hazmat.primitives.asymmetric import x25519
+                private_key = x25519.X25519PrivateKey.from_private_bytes(pri_bytes)
+                public_key = private_key.public_key()
+                pub_bytes = public_key.public_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PublicFormat.Raw
+                )
+                self.public_key_b64 = base64.b64encode(pub_bytes).decode('utf-8')
+                fingerprint = IdentityManager.generate_fingerprint(self.public_key_b64)
+                self.fingerprint_label.setText(fingerprint)
+                
+                if server_has_key and server_public_key_b64 == self.public_key_b64:
+                    server_key_matches = True
+                    self.status_label.setText("✓ 本地私钥存在，且服务器公钥匹配。可以直接使用。")
+                    self.info_label.setText("您的密钥已配置完成，点击完成即可进入聊天。")
+                    self.finish_btn.setEnabled(True)
+                    self.upload_btn.setVisible(False)
+                elif server_has_key and server_public_key_b64 != self.public_key_b64:
+                    self.status_label.setText("⚠ 本地私钥与服务器公钥不匹配！\n建议重新上传公钥覆盖服务器记录。")
+                    self.upload_btn.setVisible(True)
+                    self.info_label.setText("请点击「上传公钥到服务器」以更新服务器记录。")
+                else:
+                    self.status_label.setText("✓ 本地私钥已找到，但服务器尚未保存您的公钥。\n请点击「上传公钥到服务器」完成配置。")
+                    self.upload_btn.setVisible(True)
+                    self.info_label.setText("上传后服务器将记录您的公钥，好友才能与您进行加密通信。")
+            except Exception as e:
+                self.status_label.setText(f"✗ 本地私钥文件损坏或无效: {str(e)}")
+                self.private_key_b64 = None
+                self.upload_btn.setVisible(False)
+        else:
+            self.status_label.setText("✗ 未找到本地私钥文件。请生成新密钥对或导入已有私钥。")
+            self.upload_btn.setVisible(False)
+        
+        # 如果服务器有公钥但本地没有私钥，提示导入或生成
+        if server_has_key and not local_key_exists:
+            self.status_label.setText("⚠ 服务器已存在公钥，但本地缺少私钥。\n请导入您之前保存的私钥文件，或生成新密钥对（将覆盖服务器公钥）。")
+    
+    def generate_keypair(self):
+        """生成新的密钥对"""
+        reply = QMessageBox.question(
+            self, "确认生成",
+            "生成新密钥对将覆盖本地私钥，并会覆盖服务器上的公钥（如果存在）。\n继续吗？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        
+        try:
+            from crypto.core import IdentityManager
+            private_key_b64, public_key_b64 = IdentityManager.generate_identity_keypair()
+            self.private_key_b64 = private_key_b64
+            self.public_key_b64 = public_key_b64
+            
+            # 保存到本地
+            private_key_path = self.client._private_key_file(self.username)
+            with open(private_key_path, 'w') as f:
+                f.write(private_key_b64)
+            
+            fingerprint = IdentityManager.generate_fingerprint(public_key_b64)
+            self.fingerprint_label.setText(fingerprint)
+            
+            # 自动上传公钥
+            self.upload_public_key()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "生成失败", f"生成密钥对失败: {str(e)}")
+    
+    def import_private_key(self):
+        """从文件导入私钥"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择私钥文件", "",
+            "文本文件 (*.txt);;所有文件 (*)"
+        )
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'r') as f:
+                private_key_b64 = f.read().strip()
+            
+            # 验证私钥有效性：尝试推导公钥
+            from cryptography.hazmat.primitives.asymmetric import x25519
+            from crypto.core import IdentityManager
+            pri_bytes = base64.b64decode(private_key_b64)
+            private_key = x25519.X25519PrivateKey.from_private_bytes(pri_bytes)
+            public_key = private_key.public_key()
+            pub_bytes = public_key.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw
+            )
+            public_key_b64 = base64.b64encode(pub_bytes).decode('utf-8')
+            
+            # 保存到本地
+            private_key_path = self.client._private_key_file(self.username)
+            with open(private_key_path, 'w') as f:
+                f.write(private_key_b64)
+            
+            self.private_key_b64 = private_key_b64
+            self.public_key_b64 = public_key_b64
+            fingerprint = IdentityManager.generate_fingerprint(public_key_b64)
+            self.fingerprint_label.setText(fingerprint)
+            
+            # 自动上传公钥
+            self.upload_public_key()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", f"私钥文件无效或损坏: {str(e)}")
+    
+    def upload_public_key(self):
+        """上传公钥到服务器"""
+        if not self.public_key_b64:
+            QMessageBox.warning(self, "错误", "没有可用的公钥，请先生成或导入私钥。")
+            return
+        
+        try:
+            # 转换为字节
+            pub_bytes = base64.b64decode(self.public_key_b64)
+            success = self.client.upload_public_key(pub_bytes)
+            if success:
+                self.info_label.setText("✓ 公钥已成功上传到服务器！")
+                self.info_label.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: {FONT_SIZE - 2}px;")
+                self.status_label.setText("✓ 配置完成：本地私钥已保存，公钥已上传至服务器。")
+                self.finish_btn.setEnabled(True)
+                self.upload_btn.setVisible(False)
+            else:
+                raise Exception("服务器返回失败")
+        except Exception as e:
+            QMessageBox.critical(self, "上传失败", f"公钥上传失败: {str(e)}")
+            self.info_label.setText("✗ 上传失败，请检查网络或稍后重试。")
+            self.info_label.setStyleSheet(f"color: {COLOR_DANGER}; font-size: {FONT_SIZE - 2}px;")
+    
+    def on_finish(self):
+        """完成配置，初始化加密组件并关闭对话框"""
+        if not self.private_key_b64 or not self.public_key_b64:
+            QMessageBox.warning(self, "未完成", "请先完成密钥配置（生成/导入并上传公钥）。")
+            return
+        
+        # 初始化客户端的加密组件
+        try:
+            self.client.setup_crypto(self.username, self.private_key_b64)
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "初始化失败", f"无法初始化加密引擎: {str(e)}")
+
+
+# ==================== 修改登录成功后的处理逻辑（位于 main2.py 或 gui.py 的 main 函数中） ====================
+# 在登录成功回调函数中，添加检测和配置界面的调用，例如：
+
+def on_login_success(username, password, otp):
+    client = ClientFacade(server_url="http://localhost:80")  # 根据实际地址修改
+    if client.login_user(username, password, otp):
+        # 检测是否需要配置密钥
+        private_key_path = client._private_key_file(username)
+        local_key_exists = os.path.exists(private_key_path)
+        
+        # 检测服务器是否有公钥
+        server_has_key = False
+        try:
+            pub_bytes = client.network_client.get_public_key(username)
+            if pub_bytes:
+                server_has_key = True
+        except:
+            pass
+        
+        if not local_key_exists or not server_has_key:
+            # 弹出配置对话框
+            config_dialog = KeyConfigDialog(client, username)
+            if config_dialog.exec_() == QDialog.Accepted:
+                # 配置完成，继续进入聊天界面
+                main_window = ChatGUI(client)
+                main_window.show()
+                # 关闭登录窗口
+                for widget in QApplication.topLevelWidgets():
+                    if isinstance(widget, LoginDialog):
+                        widget.close()
+            else:
+                # 用户取消配置，则退出或停留在登录界面
+                QMessageBox.warning(None, "配置取消", "未完成密钥配置，无法使用加密聊天功能。")
+        else:
+            # 已有完整密钥，直接进入聊天
+            main_window = ChatGUI(client)
+            main_window.show()
+            for widget in QApplication.topLevelWidgets():
+                if isinstance(widget, LoginDialog):
+                    widget.close()
+    else:
+        QMessageBox.warning(None, "登录失败", "用户名、密码或OTP验证码错误")
 
 def main():
     app = QApplication(sys.argv)
