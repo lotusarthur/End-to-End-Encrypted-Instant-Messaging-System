@@ -52,8 +52,9 @@ class IdentityManager:
         pwd_hash = kdf.derive(password.encode('utf-8'))
         return base64.b64encode(pwd_hash).decode('utf-8'), base64.b64encode(salt).decode('utf-8')
 
+##双重解码问题解决
     @staticmethod
-    def generate_identity_keypair() -> Tuple[str, str]:
+    def generate_identity_keypair() -> Tuple[bytes, bytes]:
         """
         R4: 生成设备的长期身份密钥对 (X25519)
         返回: (private_key_b64, public_key_b64)
@@ -88,7 +89,7 @@ class IdentityManager:
         print(f"解码后的私钥长度: {len(pri_bytes)} bytes")
         print(f"解码后的公钥长度: {len(pub_bytes)} bytes")
         
-        return private_key_b64, public_key_b64
+        return pri_bytes, pub_bytes
 
     @staticmethod
     def generate_fingerprint(public_key_b64: str) -> str:
