@@ -842,20 +842,7 @@ class ChatGUI(QMainWindow):
         last_msg_dict = {}
         for msg in offline_messages:
             sender = msg.get('from_user') or msg.get('sender_id', 'Unknown')
-            ciphertext = msg.get('ciphertext') or msg.get('ciphertext_b64', b'')
-            if isinstance(ciphertext, str):
-                import base64
-                try:
-                    text = base64.b64decode(ciphertext).decode('utf-8')
-                except:
-                    text = ciphertext
-            else:
-                text = ciphertext.decode('utf-8') if isinstance(ciphertext, bytes) else str(ciphertext)
-            
-            if sender not in last_msg_dict:
-                last_msg_dict[sender] = text
-        
-        self.friends_list.clear()
+            text = msg.get('decrypted_content', '')
         
         if not friends:
             self.friends_list.addItem("暂无好友")
@@ -895,16 +882,7 @@ class ChatGUI(QMainWindow):
         for msg in messages:
             sender = msg.get('from_user') or msg.get('sender_id', 'Unknown')
             if sender == friend_name:
-                ciphertext = msg.get('ciphertext') or msg.get('ciphertext_b64', b'')
-                if isinstance(ciphertext, str):
-                    import base64
-                    try:
-                        text = base64.b64decode(ciphertext).decode('utf-8')
-                    except:
-                        text = ciphertext
-                else:
-                    text = ciphertext.decode('utf-8') if isinstance(ciphertext, bytes) else str(ciphertext)
-                
+                text = msg.get('decrypted_content', '')
                 timestamp = msg.get('timestamp', 0)
                 time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M") if timestamp else "?"
                 self.messages_text.append(f"[{time_str}] {sender}: {text}")
