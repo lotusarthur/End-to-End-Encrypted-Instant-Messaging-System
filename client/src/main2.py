@@ -321,6 +321,7 @@ class ClientFacade:
                     clear_text = self.crypto_engine.decrypt_message(msg_pkg)
                     sender = msg_pkg.get('sender_id') or msg_pkg.get('from_user', 'Unknown')
                     print(f"来自 {sender} 的加密消息: {clear_text}")
+                    msg_pkg['decrypted_content'] = clear_text
                 except Exception as e:
                     sender = msg_pkg.get('sender_id') or msg_pkg.get('from_user', 'Unknown')
                     print(f"来自 {sender} 的消息解密失败，消息可能被篡改: {e}")
