@@ -842,7 +842,13 @@ class ChatGUI(QMainWindow):
         last_msg_dict = {}
         for msg in offline_messages:
             sender = msg.get('from_user') or msg.get('sender_id', 'Unknown')
-            text = msg.get('decrypted_content', '')
+            try:
+                clear_text = self.client.crypto_engine.decrypt_message(msg)
+                if sender not in last_msg_dict:
+                    last_msg_dict[sender] = clear_text
+            except Exception as e:
+                if sender not in last_msg_dict:
+                    last_msg_dict[sender] = "[解密失败]"
         
         if not friends:
             self.friends_list.addItem("暂无好友")
@@ -882,7 +888,12 @@ class ChatGUI(QMainWindow):
         for msg in messages:
             sender = msg.get('from_user') or msg.get('sender_id', 'Unknown')
             if sender == friend_name:
-                text = msg.get('decrypted_content', '')
+                try:
+                    clear_text = self.client.crypto_engine.decrypt_message(msg)
+                    text = clear_text
+                except Exception as e:
+                    text = f"[解密失败: {str(e)[:30]}]"
+
                 timestamp = msg.get('timestamp', 0)
                 time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M") if timestamp else "?"
                 self.messages_text.append(f"[{time_str}] {sender}: {text}")
